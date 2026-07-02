@@ -1,55 +1,112 @@
 # AI Voice Assistant — AstrBot Plugin
 
-允许AI 通过 `ai_speak` 工具自主调用 TTS 回复语音。支持多 Provider 降级、双层密度控制、QQ 号白名单。
+允许 AI 通过 `ai_speak` 工具自主调用 TTS 回复语音。支持多 Provider 降级、三级权限管理、长文本分段合并、双层密度控制。
 
 ## 功能
 
 - **LLM 工具 `ai_speak`** — AI 通过 function calling 自主决定何时发语音
+- **三级权限管理** — 无限制 / 基准限制 / 完全限制，按会话独立配置，支持 `/voice_perm` 指令
+- **长文本分段合并** — 超长文本按句号自动分段合成，可选合并为一条语音
 - **多 Provider 降级** — 首选 → 兜底 → 系统默认三级自动切换
 - **双层密度控制** — 会话级硬阻断 + 用户级 Logistic 概率降权
-- **会话/QQ 号权限** — 完整 session ID / QQ 号 / 群号三种格式的白名单
 - **速率限制** — 每会话可配置最小调用间隔
 - **文字+语音双输出** — 同时发送文字和语音文件
 
 ## 前置条件
 
-AstrBot 已注册至少一个 TTS Provider。
+AstrBot 已注册至少一个 TTS Provider（如 Aliyun MiniMax TTS）。
+
+## 快速开始
+
+1. 在 WebUI 配置面板中开启 `voice_enabled`
+2. 选择 `tts_provider_id`（如 `tts-aliyun-minimax`）
+3. 其余保持默认即可
+4. 从 QQ 给机器人发消息触发语音，如：**"用语音说你好"**
 
 ## 配置
 
-在 WebUI 管理面板中配置以下项：
+设置面板分为 6 个模块：
+
+### 语音引擎
 
 | 配置 | 类型 | 默认 | 说明 |
 |------|------|------|------|
-| `tts_provider_id` | 下拉 | — | 首选 TTS Provider |
-| `tts_fallback_provider_id` | 下拉 | — | 兜底 Provider |
-| `voice_enabled` | bool | true | 总开关 |
-| `sessions_whitelist` | list[str] | [] | 允许的完整会话 ID（/sid 格式） |
-| `sessions_blacklist` | list[str] | [] | 禁止的完整会话 ID |
-| `qq_users_whitelist` | list[str] | [] | 允许的 QQ 用户号（私聊） |
-| `qq_users_blacklist` | list[str] | [] | 禁止的 QQ 用户号 |
-| `qq_groups_whitelist` | list[str] | [] | 允许的 QQ 群号 |
-| `qq_groups_blacklist` | list[str] | [] | 禁止的 QQ 群号 |
-| `rate_limit_seconds` | int | 5 | TTS 调用最小间隔（秒） |
-| `density_window_minutes` | int | 10 | 会话密度统计窗口（分） |
+| `voice_enabled` | bool | true | 全局开关 |
+| `tts_provider_id` | 下拉 | — | 首选 TTS 引擎 |
+| `tts_fallback_provider_id` | 下拉 | — | 备选引擎（自动降级） |
+
+### 文本处理
+
+| 配置 | 类型 | 默认 | 说明 |
+|------|------|------|------|
+| `min_text_length` | int | 2 | 最小长度，短于此值跳过 |
+| `max_text_length` | int | 500 | 文本上限，超长自动分段不截断 |
+| `tts_segment_max_chars` | int | 80 | 每段最大字符数 |
+| `tts_merge_enabled` | bool | false | 是否合并多段为一条语音 |
+| `tts_merge_timeout_seconds` | int | 30 | 合并超时（秒），需开启合并 |
+
+### 频率控制
+
+| 配置 | 类型 | 默认 | 说明 |
+|------|------|------|------|
+| `rate_limit_seconds` | int | 5 | 两次语音最小间隔（0=不限制） |
+| `density_window_minutes` | int | 10 | 会话密度统计窗口（分钟） |
 | `density_max_count` | int | 3 | 窗口内最大语音次数 |
-| `user_density_window_minutes` | int | 60 | 用户触发统计窗口（分） |
-| `user_density_threshold` | int | 5 | 用户触发频次阈值 |
-| `user_density_curve_steepness` | float | 0.7 | 概率衰减陡峭度（0=关闭） |
-| `voice_prompt_extra` | text | "" | 额外语音 Prompt（拟人化定制） |
-| `log_level` | string | "info" | info / debug |
+| `user_density_window_minutes` | int | 60 | 用户密度统计窗口（分钟） |
+| `user_density_threshold` | int | 5 | 触发频次阈值，超此值概率衰减 |
+| `user_density_curve_steepness` | float | 0.7 | 衰减陡峭度（0=关闭降权） |
 
-## 工作原理
+### 权限管理
 
-```
-用户输入 → LLM 思考 → LLM 调用 ai_speak(text)
-                            ↓
-           权限检查 → 密度检查 → Provider 获取 → TTS 合成
-                            ↓
-                    文字 + 语音同时发送
-```
+| 配置 | 类型 | 默认 | 说明 |
+|------|------|------|------|
+| `default_permission_level` | 下拉 | 1 | 默认权限等级 |
+| `session_permissions` | list | [] | 会话权限覆盖（格式：`ID:等级`） |
 
-LLM 调用 `ai_speak` 后会收到执行结果（成功/失败原因），可据此调整后续行为。
+权限等级说明：
+
+| 等级 | 值 | 行为 |
+|------|-----|------|
+| 无限制 | 0 | 跳过所有速率/密度检查（管理员私聊默认） |
+| 基准限制 | 1 | 受速率间隔和双层密度控制（全局默认） |
+| 完全限制 | 2 | 禁止语音（即黑名单） |
+
+### LLM 行为
+
+| 配置 | 类型 | 默认 | 说明 |
+|------|------|------|------|
+| `voice_prompt_extra` | text | "" | 注入 LLM 的语音行为规则 |
+
+### 调试
+
+| 配置 | 类型 | 默认 | 说明 |
+|------|------|------|------|
+| `log_level` | 下拉 | info | info / debug |
+
+## 指令
+
+| 指令 | 说明 |
+|------|------|
+| `/voice_perm set <ID> <0|1|2>` | 设置会话权限等级（管理员） |
+| `/voice_perm get [ID]` | 查询会话权限 |
+| `/voice_perm list` | 列出所有自定义权限 |
+| `/voice_perm del <ID>` | 删除自定义权限，恢复默认 |
+| `/voice_perm help` | 显示帮助 |
+| `/sid` | 获取当前会话 ID |
+
+## 日志
+
+工具调用和密度判定始终输出 info 日志。在 AstrBot 控制台搜索以下关键词：
+
+| 关键词 | 含义 |
+|--------|------|
+| `[ai_speak] >>>` | LLM 调用了 ai_speak |
+| `[ai_speak] 权限等级` | 当前权限判定结果 |
+| `[ai_speak] 文本分段` | 长文本被分为几段 |
+| `[ai_speak] TTS合成` | 每段语音合成进度 |
+| `[ai_speak] 发送消息` | 语音已发送 |
+| `[密度判定-会话]` | 会话级密度检查 |
+| `[密度判定-用户]` | 用户级概率降权计算 |
 
 ## 密度控制
 
@@ -63,3 +120,13 @@ LLM 调用 `ai_speak` 后会收到执行结果（成功/失败原因），可据
 | 5（阈值） | 50% |
 | 7 | ~20% |
 | 10+ | ~3% |
+
+## 长文本处理
+
+```
+超长文本 → 按换行符分段 → 按句号再分段 → 每段 ≤ 80 字符
+                ↓
+       逐段 TTS 合成 → 合并开关?
+                    ↓ 开启        ↓ 关闭
+              合并为一条 → 超时 30s → 降级为分段发送
+```
