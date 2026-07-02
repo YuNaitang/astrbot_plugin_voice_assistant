@@ -16,19 +16,35 @@
     "type": "bool",
     "default": true
   },
-  "sessions_whitelist": {
-    "description": "允许语音的完整会话 ID，用 /sid 获取。留空=全部放行。",
+
+  "session_permissions": {
+    "description": "会话权限等级。格式: session_id:等级。0=无限制 1=基准限制 2=完全限制。可用 /voice_perm 指令管理。",
     "type": "list",
     "items": {"type": "string"},
-    "hint": "格式: aiocqhttp:GroupMessage:123456"
+    "hint": "格式: aiocqhttp:GroupMessage:123456:0 或 QQ号:0"
+  },
+  "default_permission_level": {
+    "description": "默认权限等级（0=无限制, 1=基准限制, 2=完全限制）。管理员私聊默认始终为 0。",
+    "type": "int",
+    "default": 1,
+    "options": [0, 1, 2],
+    "labels": ["无限制", "基准限制", "完全限制"]
+  },
+
+  "sessions_whitelist": {
+    "description": "[已废弃] 请改用 session_permissions。允许语音的完整会话 ID。",
+    "type": "list",
+    "items": {"type": "string"},
+    "hint": "已废弃，请使用 session_permissions"
   },
   "sessions_blacklist": {
-    "description": "禁止语音的完整会话 ID（优先于白名单）",
+    "description": "[兼容] 禁止语音的完整会话 ID，自动映射为权限等级 2。建议迁移到 session_permissions。",
     "type": "list",
     "items": {"type": "string"}
   },
+
   "max_text_length": {
-    "description": "TTS 文本最大长度（超长自动截断）",
+    "description": "TTS 文本最大长度。超长文本将自动分段处理而非截断。",
     "type": "int",
     "default": 500
   },
@@ -37,8 +53,19 @@
     "type": "int",
     "default": 2
   },
+  "tts_segment_max_chars": {
+    "description": "长文本分段时每段最大字符数（按换行符 → 句号分割，单句超长时强制切分）",
+    "type": "int",
+    "default": 80
+  },
+  "tts_merge_timeout_seconds": {
+    "description": "多段音频合并超时（秒），超时后改为分段发送",
+    "type": "int",
+    "default": 60
+  },
+
   "rate_limit_seconds": {
-    "description": "同一会话 TTS 调用间隔（秒）",
+    "description": "同一会话 TTS 调用间隔（秒），仅基准限制等级生效",
     "type": "int",
     "default": 5
   },
@@ -96,7 +123,7 @@
     "hint": "例如：用可爱的语气说话"
   },
   "log_level": {
-    "description": "日志级别",
+    "description": "日志级别（工具调用和密度判定始终输出 info 日志）",
     "type": "string",
     "default": "info",
     "options": ["info", "debug"],

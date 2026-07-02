@@ -2,10 +2,14 @@
 AI Voice Assistant — AstrBot 通用 TTS 编排插件
 
 允许AI 通过工具自主调用 TTS 回复语音。
-支持多 Provider 降级、双层密度控制、会话/QQ 号权限管理。
+支持多 Provider 降级、三级权限管理、双层密度控制、长文本分段合并。
 """
 import os
+import re
 import random
+import asyncio
+import tempfile
+import subprocess
 from datetime import datetime, timedelta
 from math import exp
 from typing import Optional
@@ -18,6 +22,17 @@ from astrbot.core.message.components import Plain, Record
 from astrbot.core.message.message_event_result import MessageChain
 from astrbot.core.platform.message_type import MessageType
 from astrbot.core.provider.provider import TTSProvider
+
+
+# ====================================================================
+# 权限等级常量
+# ====================================================================
+
+PERM_UNLIMITED = 0    # 无限制
+PERM_BASIC = 1        # 基准限制（速率 + 密度）
+PERM_RESTRICTED = 2   # 完全限制（黑名单）
+
+PERM_LABELS = {0: "无限制", 1: "基准限制", 2: "完全限制"}
 
 
 class Main(Star):
@@ -39,7 +54,11 @@ class Main(Star):
         # 用户级密度（概率降权）
         self._user_trigger_timeline: dict[str, dict[str, list[datetime]]] = {}
 
-        self._log_available_tts_providers()  # 可能尚未初始化，静默跳过
+        # 权限缓存：session_id → level
+        self._perm_cache: dict[str, int] = {}
+        self._load_permission_cache()
+
+        self._log_available_tts_providers()
         logger.info(
             f"AI Voice Assistant 已加载 "
             f"(enabled={self.config.get('voice_enabled', True)}, "
@@ -86,6 +105,107 @@ class Main(Star):
         self._providers_logged = True
 
     # ------------------------------------------------
+    # 权限等级管理
+    # ------------------------------------------------
+
+    def _load_permission_cache(self):
+        """从配置加载权限映射到缓存。
+
+        支持格式：
+        - session_permissions: ["session_id:level", ...]（新格式）
+        - sessions_blacklist: [...] → 自动映射为 level=2（兼容旧格式）
+        """
+        self._perm_cache.clear()
+
+        # 1. 新格式：session_permissions
+        entries = self.config.get("session_permissions", []) or []
+        for entry in entries:
+            entry = entry.strip()
+            if not entry:
+                continue
+            parts = entry.rsplit(":", 1)
+            if len(parts) == 2:
+                sid, level_str = parts
+                try:
+                    level = int(level_str)
+                    if level in (PERM_UNLIMITED, PERM_BASIC, PERM_RESTRICTED):
+                        self._perm_cache[sid.strip()] = level
+                except ValueError:
+                    logger.warning(f"[voice_perm] 无效的权限配置条目: {entry}")
+
+        # 2. 兼容旧格式：sessions_blacklist → level=2
+        blacklist = self.config.get("sessions_blacklist", []) or []
+        for sid in blacklist:
+            sid = sid.strip()
+            if sid and sid not in self._perm_cache:
+                self._perm_cache[sid] = PERM_RESTRICTED
+
+    def _get_session_permission_level(self, event: AstrMessageEvent) -> int:
+        """获取会话的语音权限等级。
+
+        查找顺序：
+        1. 完整 session ID 精确匹配
+        2. QQ 号匹配（私聊/群聊 session_id）
+        3. 管理员私聊 → 默认 UNLIMITED
+        4. 全局默认等级
+        """
+        session_str = str(event.session)
+        msg_type = event.session.message_type
+        sid = event.session.session_id
+
+        # 1. 完整 session ID 匹配
+        if session_str in self._perm_cache:
+            return self._perm_cache[session_str]
+
+        # 2. QQ 号匹配
+        if sid and sid in self._perm_cache:
+            return self._perm_cache[sid]
+
+        # 3. 管理员私聊 → 默认无限制
+        if event.is_admin() and msg_type == MessageType.FRIEND_MESSAGE:
+            return PERM_UNLIMITED
+
+        # 4. 全局默认
+        return self.config.get("default_permission_level", PERM_BASIC)
+
+    def _save_permission(self, session_id: str, level: int):
+        """保存权限到配置并刷新缓存。"""
+        entries = self.config.get("session_permissions", []) or []
+        prefix = f"{session_id}:"
+        new_entries = [e for e in entries if not e.startswith(prefix)]
+        new_entries.append(f"{session_id}:{level}")
+        self.config["session_permissions"] = new_entries
+        self._load_permission_cache()
+        self._persist_config()
+
+    def _remove_permission(self, session_id: str):
+        """删除自定义权限配置，恢复默认等级。"""
+        entries = self.config.get("session_permissions", []) or []
+        prefix = f"{session_id}:"
+        self.config["session_permissions"] = [e for e in entries if not e.startswith(prefix)]
+        self._load_permission_cache()
+        self._persist_config()
+
+    def _persist_config(self):
+        """尝试持久化配置到文件。"""
+        try:
+            import json
+            import os
+            config_path = os.path.join(
+                os.path.dirname(os.path.abspath(__file__)),
+                "..", "..", "data", "config",
+                "astrbot_plugin_voice_assistant.json",
+            )
+            # 标准化路径
+            config_path = os.path.normpath(config_path)
+            if os.path.exists(os.path.dirname(config_path)):
+                with open(config_path, "w", encoding="utf-8") as f:
+                    json.dump(self.config, f, ensure_ascii=False, indent=2)
+                logger.debug(f"[voice_perm] 配置已持久化: {config_path}")
+        except Exception as e:
+            logger.debug(f"[voice_perm] 配置持久化失败（非致命）: {e}")
+
+    # ------------------------------------------------
     # LLM 请求注入（密度提醒 + extra prompt）
     # ------------------------------------------------
 
@@ -121,51 +241,86 @@ class Main(Star):
         return [t for t in timestamps if t > cutoff]
 
     def _is_over_density_limit(self, session_id: str) -> bool:
-        """会话级硬阻断：超限后完全阻止语音"""
+        """会话级硬阻断：超限后完全阻止语音。"""
         window = self.config.get("density_window_minutes", 10)
         max_count = self.config.get("density_max_count", 3)
         timeline = self._voice_timeline.get(session_id, [])
+        old_count = len(timeline)
         timeline = self._prune_timeline(timeline, window)
+        new_count = len(timeline)
         self._voice_timeline[session_id] = timeline
-        return len(timeline) >= max_count
+
+        is_over = new_count >= max_count
+        logger.info(
+            f"[密度判定-会话] session={session_id} "
+            f"window={window}min max={max_count} "
+            f"裁剪前={old_count} 裁剪后={new_count} "
+            f"结果={'超限' if is_over else '放行'}"
+        )
+        return is_over
 
     def _get_user_probability(self, session_id: str, user_id: str) -> float:
-        """Logistic 曲线计算用户级概率降权系数"""
+        """Logistic 曲线计算用户级概率降权系数。"""
         window = self.config.get("user_density_window_minutes", 60)
         threshold = self.config.get("user_density_threshold", 5)
         steepness = self.config.get("user_density_curve_steepness", 0.7)
 
         if steepness <= 0:
+            logger.info(
+                f"[密度判定-用户] session={session_id} user={user_id} "
+                f"steepness=0 跳过降权 → prob=1.0"
+            )
             return 1.0
 
         user_map = self._user_trigger_timeline.get(session_id, {})
-        timeline = self._prune_timeline(user_map.get(user_id, []), window)
+        old_timeline = user_map.get(user_id, [])
+        old_count = len(old_timeline)
+        timeline = self._prune_timeline(old_timeline, window)
+        new_count = len(timeline)
         user_map[user_id] = timeline
         self._user_trigger_timeline[session_id] = user_map
 
-        count = len(timeline)
-        prob = 1.0 / (1.0 + exp(steepness * (count - threshold)))
+        prob = 1.0 / (1.0 + exp(steepness * (new_count - threshold)))
+        logger.info(
+            f"[密度判定-用户] session={session_id} user={user_id} "
+            f"window={window}min threshold={threshold} steepness={steepness} "
+            f"裁剪前={old_count} 裁剪后={new_count} "
+            f"prob={prob:.4f}"
+        )
         return prob
 
-    def _should_allow_voice(self, session_id: str, user_id: str) -> bool:
-        """综合决策：先会话硬阻断，再用户概率降权"""
-        if self._is_over_density_limit(session_id):
-            return False
+    def _should_allow_voice(self, session_id: str, user_id: str) -> tuple:
+        """综合决策：先会话硬阻断，再用户概率降权。
 
+        Returns:
+            (是否允许: bool, 原因描述: str)
+        """
+        # 会话级硬阻断
+        if self._is_over_density_limit(session_id):
+            reason = f"会话语音密度超限，请稍后再试"
+            logger.info(f"[密度结果] 拒绝 — {reason}")
+            return False, reason
+
+        # 用户级概率降权
         prob = self._get_user_probability(session_id, user_id)
         if prob < 1.0:
-            _log_debug(self.config, f"ai_speak: user_prob={prob:.3f}")
-            if random.random() >= prob:
-                return False
+            rand_val = random.random()
+            if rand_val >= prob:
+                reason = (
+                    f"用户语音触发频率较高，本次随机跳过 "
+                    f"(prob={prob:.4f} rand={rand_val:.4f})"
+                )
+                logger.info(f"[密度结果] 拒绝 — {reason}")
+                return False, reason
 
-        return True
+        logger.info(f"[密度结果] 放行 — session={session_id} user={user_id}")
+        return True, ""
 
     def _record_voice_sent(self, session_id: str, user_id: str):
         """成功发送语音后记录时间戳"""
         self._voice_timeline.setdefault(session_id, []).append(datetime.now())
         user_map = self._user_trigger_timeline.setdefault(session_id, {})
         user_map.setdefault(user_id, []).append(datetime.now())
-        # 窗口内新语音 → 清除旧提醒标记（下次超限可再次提醒）
         self._density_warned.discard(session_id)
 
     # ------------------------------------------------
@@ -180,120 +335,192 @@ class Main(Star):
         Args:
             text(string): 想说出的文本（中文，自然流畅的口语表达）
         """
+        session_id = str(event.session)
+        user_id = event.get_sender_id()
+
+        logger.info(
+            f"[ai_speak] >>> 收到调用 session={session_id} user={user_id} "
+            f"text_len={len(text) if text else 0}"
+        )
+        logger.info(f"[ai_speak] 全文: {text!r}")
+
         self._log_available_tts_providers()
 
+        # ================================================
         # 0. 总开关
+        # ================================================
         if not self.config.get("voice_enabled", True):
-            _log_debug(self.config, "ai_speak: voice_enabled=false，跳过")
-            return
+            msg = "语音功能未启用（voice_enabled=false）"
+            logger.info(f"[ai_speak] 拒绝: {msg}")
+            return msg
 
-        # 1. 权限检查
-        if self._check_permission(event):
-            return
+        # ================================================
+        # 1. 权限等级检查
+        # ================================================
+        perm_level = self._get_session_permission_level(event)
+        logger.info(
+            f"[ai_speak] 权限等级: {PERM_LABELS.get(perm_level, '未知')} "
+            f"(level={perm_level})"
+        )
 
+        if perm_level == PERM_RESTRICTED:
+            msg = "该会话已被限制使用语音功能"
+            logger.info(f"[ai_speak] 拒绝: {msg}")
+            return msg
+
+        # ================================================
         # 2. 文本长度校验
+        # ================================================
         min_len = self.config.get("min_text_length", 2)
-        max_len = self.config.get("max_text_length", 500)
-
         if not text or len(text.strip()) < min_len:
-            _log_debug(self.config, f"ai_speak: 文本太短 ({len(text) if text else 0} chars)，跳过")
-            return
+            msg = f"文本太短 ({len(text) if text else 0} chars)，最少需要 {min_len} 字符"
+            logger.info(f"[ai_speak] 跳过: {msg}")
+            return msg
 
-        if len(text) > max_len:
-            original_len = len(text)
-            text = text[:max_len]
-            _log_debug(self.config,
-                       f"ai_speak: 文本过长 ({original_len})，已截断至 {max_len} 字符")
+        # ================================================
+        # 3. 基准限制等级：速率 + 密度检查
+        # ================================================
+        if perm_level == PERM_BASIC:
+            # 速率限制
+            rate_msg = self._check_rate_limit(session_id)
+            if rate_msg:
+                logger.info(f"[ai_speak] 拒绝: {rate_msg}")
+                return rate_msg
 
-        # 3. 速率限制
-        session_id = str(event.session)
-        if self._check_rate_limit(session_id):
-            return
+            # 双层密度
+            allowed, reason = self._should_allow_voice(session_id, user_id)
+            if not allowed:
+                logger.info(f"[ai_speak] 拒绝: {reason}")
+                return reason
 
-        # 4. 双层密度检查
-        user_id = event.get_sender_id()
-        if not self._should_allow_voice(session_id, user_id):
-            return
-
-        # 5. 获取 TTS Provider
+        # ================================================
+        # 4. 获取 TTS Provider
+        # ================================================
         provider = self._get_tts_provider(event)
         if provider is None:
-            logger.warning("ai_speak: 未找到可用的 TTS Provider")
-            return "语音合成失败：未找到可用的 TTS 服务，请检查 AstrBot 的 TTS 提供商配置。"
+            msg = "语音合成失败：未找到可用的 TTS 服务，请检查 AstrBot 的 TTS 提供商配置。"
+            logger.warning(f"[ai_speak] {msg}")
+            return msg
 
-        # 6. TTS 合成
         try:
-            audio_path = await provider.get_audio(text)
-        except Exception as e:
-            provider_id = "?"
-            try:
-                provider_id = provider.meta().id
-            except Exception:
-                pass
-            logger.error(f"ai_speak: TTS 合成失败 (provider={provider_id}): {e}")
-            return f"语音合成失败（{provider_id}）：{e!s}"
+            provider_meta = provider.meta()
+            logger.info(
+                f"[ai_speak] TTS Provider: id={provider_meta.id} "
+                f"type={provider_meta.type}"
+            )
+        except Exception:
+            pass
 
-        _log_debug(self.config, f"ai_speak: 已合成 [{text[:50].replace(chr(10), ' ')}...] → {audio_path}")
-        self._temp_files.append(audio_path)
+        # ================================================
+        # 5. 文本分段（长文本处理）
+        # ================================================
+        segment_max_chars = self.config.get("tts_segment_max_chars", 80)
+        segments = self._segment_text(text.strip(), segment_max_chars)
+        logger.info(
+            f"[ai_speak] 文本分段: {len(segments)} 段 "
+            f"(max_chars={segment_max_chars})"
+        )
+        for i, seg in enumerate(segments):
+            logger.info(f"[ai_speak]   段{i+1}/{len(segments)}: "
+                        f"len={len(seg)} [{seg[:60]}{'...' if len(seg) > 60 else ''}]")
+
+        # ================================================
+        # 6. TTS 合成（逐段）
+        # ================================================
+        audio_paths = []
+        for i, seg in enumerate(segments):
+            try:
+                logger.info(
+                    f"[ai_speak] TTS合成 段{i+1}/{len(segments)}: "
+                    f"text={seg!r}"
+                )
+                audio_path = await provider.get_audio(seg)
+                logger.info(
+                    f"[ai_speak] TTS合成完成 段{i+1}: "
+                    f"path={audio_path}"
+                )
+                audio_paths.append(audio_path)
+                self._temp_files.append(audio_path)
+            except Exception as e:
+                provider_id = "?"
+                try:
+                    provider_id = provider.meta().id
+                except Exception:
+                    pass
+                logger.error(
+                    f"[ai_speak] TTS合成失败 段{i+1} "
+                    f"(provider={provider_id}): {e}"
+                )
+                return f"语音合成失败（{provider_id}）：{e!s}"
+
+        # ================================================
+        # 7. 合并音频（多段时尝试合并为一条）
+        # ================================================
+        merge_timeout = self.config.get("tts_merge_timeout_seconds", 60)
+        if len(audio_paths) > 1:
+            logger.info(
+                f"[ai_speak] 开始合并 {len(audio_paths)} 段音频 "
+                f"(timeout={merge_timeout}s)"
+            )
+            try:
+                final_audio = await asyncio.wait_for(
+                    asyncio.to_thread(self._merge_audio_files, audio_paths),
+                    timeout=merge_timeout,
+                )
+            except asyncio.TimeoutError:
+                logger.warning(
+                    f"[ai_speak] 音频合并超时 ({merge_timeout}s)，将分段发送"
+                )
+                final_audio = None
+        else:
+            final_audio = audio_paths[0] if audio_paths else None
+
+        # ================================================
+        # 8. 发送消息
+        # ================================================
         self._last_tts_time[session_id] = datetime.now()
         self._record_voice_sent(session_id, user_id)
 
-        # 7. 发送：文字 + 语音
-        await event.send(MessageChain([
-            Plain(text),
-            Record.fromFileSystem(audio_path),
-        ]))
-        return "语音消息已发送成功"
+        if final_audio is None and len(audio_paths) > 1:
+            # 合并失败 / 超时 → 分段发送
+            logger.info(
+                f"[ai_speak] 分段发送 {len(audio_paths)} 条语音 "
+                f"session={session_id}"
+            )
+            for i, (seg, ap) in enumerate(zip(segments, audio_paths)):
+                await event.send(MessageChain([
+                    Plain(f"[{i+1}/{len(segments)}] {seg}"),
+                    Record.fromFileSystem(ap),
+                ]))
+                logger.info(
+                    f"[ai_speak] 已发送 段{i+1}/{len(segments)} "
+                    f"session={session_id}"
+                )
+            result_msg = f"语音消息已分段发送（共 {len(segments)} 段）"
+        else:
+            # 成功合并 / 单段 → 一条发送
+            display_text = text if len(text) <= 200 else text[:200] + "..."
+            logger.info(
+                f"[ai_speak] 发送消息: text_len={len(text)} "
+                f"audio={'merged' if len(audio_paths) > 1 else 'single'} "
+                f"session={session_id}"
+            )
+            await event.send(MessageChain([
+                Plain(display_text),
+                Record.fromFileSystem(final_audio),
+            ]))
+            logger.info(f"[ai_speak] 已发送 session={session_id}")
 
-    # ------------------------------------------------
-    # 权限检查
-    # ------------------------------------------------
+            if len(segments) > 1:
+                result_msg = f"语音消息已发送成功（{len(segments)} 段已合并）"
+            else:
+                result_msg = "语音消息已发送成功"
 
-    def _check_permission(self, event: AstrMessageEvent) -> Optional[str]:
-        """None=放行，str=拦截原因"""
-        if event.is_admin():
-            return None
-
-        session_str = str(event.session)
-        sid = event.session.session_id
-        msg_type = event.session.message_type
-
-        # 1. 完整 session 黑/白名单（/sid 格式）
-        blacklist = self.config.get("sessions_blacklist", []) or []
-        if blacklist and session_str in blacklist:
-            _log_debug(self.config, f"ai_speak: 会话 {session_str} 在黑名单中，拦截")
-            return "blacklisted"
-
-        whitelist = self.config.get("sessions_whitelist", []) or []
-        if whitelist and session_str not in whitelist:
-            pass  # 不在完整 session 白名单中，继续检查 QQ 号
-        elif whitelist:
-            return None
-
-        # 2. QQ 号黑/白名单
-        if msg_type == MessageType.FRIEND_MESSAGE:
-            qq_black = self.config.get("qq_users_blacklist", []) or []
-            if sid in qq_black:
-                _log_debug(self.config, f"ai_speak: QQ 用户 {sid} 在黑名单中，拦截")
-                return "blacklisted"
-
-            qq_white = self.config.get("qq_users_whitelist", []) or []
-            if qq_white and sid not in qq_white:
-                _log_debug(self.config, f"ai_speak: QQ 用户 {sid} 不在白名单中，拦截")
-                return "not_whitelisted"
-
-        elif msg_type == MessageType.GROUP_MESSAGE:
-            qq_black = self.config.get("qq_groups_blacklist", []) or []
-            if sid in qq_black:
-                _log_debug(self.config, f"ai_speak: QQ 群 {sid} 在黑名单中，拦截")
-                return "blacklisted"
-
-            qq_white = self.config.get("qq_groups_whitelist", []) or []
-            if qq_white and sid not in qq_white:
-                _log_debug(self.config, f"ai_speak: QQ 群 {sid} 不在白名单中，拦截")
-                return "not_whitelisted"
-
-        return None
+        logger.info(
+            f"[ai_speak] <<< 完成 session={session_id} user={user_id} "
+            f"segments={len(segments)}"
+        )
+        return result_msg
 
     # ------------------------------------------------
     # Provider 选取：首选 → 兜底 → 系统默认
@@ -325,7 +552,10 @@ class Main(Star):
             logger.warning(f"ai_speak: Provider ID '{provider_id}' 未找到")
             return None
         if not isinstance(p, TTSProvider):
-            logger.warning(f"ai_speak: Provider '{provider_id}' 不是 TTSProvider（{type(p).__name__}）")
+            logger.warning(
+                f"ai_speak: Provider '{provider_id}' 不是 TTSProvider "
+                f"（{type(p).__name__}）"
+            )
             return None
         return p
 
@@ -334,7 +564,7 @@ class Main(Star):
     # ------------------------------------------------
 
     def _check_rate_limit(self, session_id: str) -> Optional[str]:
-        """检查会话级速率限制"""
+        """检查会话级速率限制。返回拦截原因或 None（放行）。"""
         rate_seconds = self.config.get("rate_limit_seconds", 5)
         if rate_seconds <= 0:
             return None
@@ -345,19 +575,356 @@ class Main(Star):
 
         elapsed = (datetime.now() - last_time).total_seconds()
         if elapsed < rate_seconds:
-            _log_debug(
-                self.config,
-                f"ai_speak: 会话 {session_id} 频率限制 ({elapsed:.1f}s < {rate_seconds}s)"
+            msg = (
+                f"会话频率限制（距上次 {elapsed:.1f}s，"
+                f"需等待 {rate_seconds}s）"
             )
-            return "rate_limited"
+            logger.info(
+                f"[ai_speak] 速率限制: session={session_id} "
+                f"elapsed={elapsed:.1f}s < {rate_seconds}s"
+            )
+            return msg
         return None
 
+    # ------------------------------------------------
+    # 长文本分段
+    # ------------------------------------------------
 
-# ====================================================================
-# 小工具
-# ====================================================================
+    def _segment_text(self, text: str, max_chars: int = 80) -> list[str]:
+        """将长文本按换行符、句号等分割为适合 TTS 的小段。
 
-def _log_debug(config: dict, msg: str):
-    """仅在 log_level=debug 时输出日志"""
-    if config.get("log_level", "info") == "debug":
-        logger.debug(msg)
+        分割策略（按优先级）：
+        1. 先按换行符 \\n 分割
+        2. 再按句尾标点（。！？.!?）分割
+        3. 每段最多 max_chars 字符
+        4. 单句超长时强制按 max_chars 切分
+
+        Args:
+            text: 原始文本
+            max_chars: 每段最大字符数
+
+        Returns:
+            分段后的文本列表，保证非空
+        """
+        if len(text) <= max_chars:
+            return [text]
+
+        segments = []
+
+        # 第一步：按换行符分段
+        paragraphs = text.split('\n')
+
+        for para in paragraphs:
+            para = para.strip()
+            if not para:
+                continue
+
+            if len(para) <= max_chars:
+                segments.append(para)
+                continue
+
+            # 第二步：按句尾标点分割
+            sentences = re.split(r'(?<=[。！？.!?])', para)
+            current = ""
+
+            for sent in sentences:
+                sent = sent.strip()
+                if not sent:
+                    continue
+
+                if len(current) + len(sent) <= max_chars:
+                    current += sent
+                else:
+                    if current:
+                        segments.append(current)
+
+                    # 单句超长，强制切分
+                    if len(sent) > max_chars:
+                        for i in range(0, len(sent), max_chars):
+                            segments.append(sent[i:i + max_chars])
+                        current = ""
+                    else:
+                        current = sent
+
+            if current:
+                segments.append(current)
+
+        # 确保至少返回一段
+        return segments if segments else [text[:max_chars]]
+
+    # ------------------------------------------------
+    # 音频合并
+    # ------------------------------------------------
+
+    def _merge_audio_files(self, audio_paths: list[str]) -> Optional[str]:
+        """合并多个音频文件为一个。
+
+        降级策略：pydub → ffmpeg → wave → None（分段发送）
+
+        Args:
+            audio_paths: 音频文件路径列表
+
+        Returns:
+            合并后的文件路径，或 None（所有方法均失败时）
+        """
+        if not audio_paths:
+            return None
+        if len(audio_paths) == 1:
+            return audio_paths[0]
+
+        output_dir = os.path.dirname(audio_paths[0])
+        output_path = os.path.join(output_dir, "tts_merged.wav")
+
+        # ---- 方法 1: pydub ----
+        try:
+            from pydub import AudioSegment
+            logger.info(
+                f"[merge] 使用 pydub 合并 {len(audio_paths)} 个音频文件"
+            )
+            combined = AudioSegment.empty()
+            for path in audio_paths:
+                segment = AudioSegment.from_file(path)
+                combined += segment
+            combined.export(output_path, format="wav")
+            logger.info(f"[merge] pydub 合并完成: {output_path}")
+            self._temp_files.append(output_path)
+            return output_path
+        except ImportError:
+            logger.debug("[merge] pydub 未安装，尝试下一方案")
+        except Exception as e:
+            logger.warning(f"[merge] pydub 合并失败: {e}，尝试下一方案")
+
+        # ---- 方法 2: ffmpeg 命令行 ----
+        try:
+            concat_list = tempfile.NamedTemporaryFile(
+                mode='w', suffix='.txt', delete=False, encoding='utf-8'
+            )
+            for path in audio_paths:
+                abs_path = os.path.abspath(path).replace('\\', '/')
+                concat_list.write(f"file '{abs_path}'\n")
+            concat_list.close()
+
+            logger.info(
+                f"[merge] 使用 ffmpeg 合并 {len(audio_paths)} 个音频文件"
+            )
+            result = subprocess.run(
+                ['ffmpeg', '-y', '-f', 'concat', '-safe', '0',
+                 '-i', concat_list.name, '-c', 'copy', output_path],
+                capture_output=True, text=True, timeout=50,
+            )
+            os.unlink(concat_list.name)
+
+            if result.returncode == 0 and os.path.exists(output_path):
+                logger.info(f"[merge] ffmpeg 合并完成: {output_path}")
+                self._temp_files.append(output_path)
+                return output_path
+            else:
+                logger.warning(f"[merge] ffmpeg 合并失败: {result.stderr}")
+        except FileNotFoundError:
+            logger.debug("[merge] ffmpeg 未安装，尝试下一方案")
+        except subprocess.TimeoutExpired:
+            logger.warning("[merge] ffmpeg 合并超时")
+        except Exception as e:
+            logger.warning(f"[merge] ffmpeg 合并异常: {e}")
+
+        # ---- 方法 3: wave 模块（仅 WAV） ----
+        try:
+            import wave
+            logger.info(
+                f"[merge] 使用 wave 模块合并 {len(audio_paths)} 个 WAV 文件"
+            )
+            params = None
+            frames = []
+            for path in audio_paths:
+                with wave.open(path, 'rb') as wf:
+                    if params is None:
+                        params = wf.getparams()
+                    frames.append(wf.readframes(wf.getnframes()))
+
+            with wave.open(output_path, 'wb') as wf:
+                wf.setparams(params)
+                for f in frames:
+                    wf.writeframes(f)
+
+            logger.info(f"[merge] wave 合并完成: {output_path}")
+            self._temp_files.append(output_path)
+            return output_path
+        except Exception as e:
+            logger.warning(f"[merge] wave 合并失败: {e}")
+
+        logger.error("[merge] 所有合并方法均失败，将分段发送")
+        return None
+
+    # ------------------------------------------------
+    # 命令：语音权限管理
+    # ------------------------------------------------
+
+    @filter.command("voice_perm")
+    async def cmd_voice_perm(self, event: AstrMessageEvent):
+        """管理语音权限等级。
+
+        用法:
+          /voice_perm set <session_id> <0|1|2>  — 设置权限
+          /voice_perm get [session_id]           — 查询权限
+          /voice_perm list                       — 列出所有自定义权限
+          /voice_perm help                       — 显示帮助
+          /voice_perm del <session_id>           — 删除自定义权限
+
+        等级: 0=无限制 1=基准限制 2=完全限制
+        """
+        if not event.is_admin():
+            await event.send(MessageChain([
+                Plain("❌ 权限不足：仅管理员可管理语音权限")
+            ]))
+            return
+
+        raw_msg = event.get_message_str()
+        parts = raw_msg.strip().split()
+
+        if len(parts) < 2:
+            await event.send(MessageChain([Plain(
+                "📋 语音权限管理\n\n"
+                "/voice_perm set <session_id> <0|1|2>\n"
+                "/voice_perm get [session_id]\n"
+                "/voice_perm list\n"
+                "/voice_perm del <session_id>\n"
+                "/voice_perm help\n\n"
+                "用 /sid 获取当前会话 ID"
+            )]))
+            return
+
+        action = parts[1].lower()
+
+        # --- help ---
+        if action == "help":
+            await event.send(MessageChain([Plain(
+                "📋 语音权限管理\n\n"
+                "/voice_perm set <session_id> <0|1|2>\n"
+                "  设置会话的语音权限等级\n"
+                "  0 = 无限制（不进行任何限制）\n"
+                "  1 = 基准限制（速率+密度控制，默认）\n"
+                "  2 = 完全限制（禁止语音，即黑名单）\n\n"
+                "/voice_perm get [session_id]\n"
+                "  查询会话的权限等级（不传=当前会话）\n\n"
+                "/voice_perm list\n"
+                "  列出所有自定义权限配置\n\n"
+                "/voice_perm del <session_id>\n"
+                "  删除自定义权限，恢复默认等级\n\n"
+                "用 /sid 获取当前会话的完整 ID\n"
+                "管理员的私聊会话默认为无限制等级"
+            )]))
+            return
+
+        # --- list ---
+        if action == "list":
+            entries = self.config.get("session_permissions", []) or []
+            if not entries:
+                default_label = PERM_LABELS.get(
+                    self.config.get("default_permission_level", PERM_BASIC), "?"
+                )
+                await event.send(MessageChain([Plain(
+                    f"📋 暂无自定义权限配置\n"
+                    f"全部会话使用默认等级: {default_label}"
+                )]))
+            else:
+                lines = ["📋 自定义权限列表:"]
+                for entry in sorted(entries):
+                    entry = entry.strip()
+                    if ':' in entry:
+                        parts_entry = entry.rsplit(":", 1)
+                        if len(parts_entry) == 2:
+                            sid, lvl_str = parts_entry
+                            try:
+                                lvl = int(lvl_str)
+                                label = PERM_LABELS.get(lvl, f"未知({lvl})")
+                            except ValueError:
+                                label = f"无效({lvl_str})"
+                            lines.append(f"  {sid} → {label}")
+                default_label = PERM_LABELS.get(
+                    self.config.get("default_permission_level", PERM_BASIC), "?"
+                )
+                lines.append(f"\n默认等级: {default_label}")
+                await event.send(MessageChain([Plain("\n".join(lines))]))
+            return
+
+        # --- get ---
+        if action == "get":
+            if len(parts) >= 3:
+                target_sid = parts[2]
+            else:
+                target_sid = str(event.session)
+
+            # 查找等级
+            level = self._perm_cache.get(target_sid)
+            if level is None:
+                level = self.config.get("default_permission_level", PERM_BASIC)
+                source = "默认"
+            else:
+                source = "自定义"
+
+            label = PERM_LABELS.get(level, f"未知({level})")
+            await event.send(MessageChain([Plain(
+                f"📋 会话: {target_sid}\n"
+                f"等级: {label} (level={level})\n"
+                f"来源: {source}"
+            )]))
+            return
+
+        # --- set ---
+        if action == "set":
+            if len(parts) < 4:
+                await event.send(MessageChain([Plain(
+                    "❌ 用法: /voice_perm set <session_id> <0|1|2>\n"
+                    "用 /sid 获取当前会话 ID"
+                )]))
+                return
+
+            target_sid = parts[2]
+            try:
+                level = int(parts[3])
+                if level not in (PERM_UNLIMITED, PERM_BASIC, PERM_RESTRICTED):
+                    raise ValueError
+            except ValueError:
+                await event.send(MessageChain([Plain(
+                    "❌ 等级必须为 0/1/2\n"
+                    "  0 = 无限制  1 = 基准限制  2 = 完全限制"
+                )]))
+                return
+
+            self._save_permission(target_sid, level)
+            label = PERM_LABELS[level]
+            await event.send(MessageChain([Plain(
+                f"✅ 已设置: {target_sid} → {label} (level={level})"
+            )]))
+            logger.info(
+                f"[voice_perm] 管理员设置权限: "
+                f"{target_sid} → {label}"
+            )
+            return
+
+        # --- del ---
+        if action == "del":
+            if len(parts) < 3:
+                await event.send(MessageChain([Plain(
+                    "❌ 用法: /voice_perm del <session_id>"
+                )]))
+                return
+
+            target_sid = parts[2]
+            self._remove_permission(target_sid)
+            default_level = self.config.get("default_permission_level", PERM_BASIC)
+            default_label = PERM_LABELS.get(default_level, "?")
+            await event.send(MessageChain([Plain(
+                f"✅ 已删除自定义权限: {target_sid}\n"
+                f"已恢复默认等级: {default_label}"
+            )]))
+            logger.info(
+                f"[voice_perm] 管理员删除权限: {target_sid}"
+            )
+            return
+
+        # --- unknown ---
+        await event.send(MessageChain([Plain(
+            f"❌ 未知操作: {action}\n"
+            f"用法: /voice_perm set|get|list|del|help"
+        )]))

@@ -1,8 +1,8 @@
 name: astrbot_plugin_voice_assistant
 author: YuNaitang
-desc: 允许AI 通过工具主动调 TTS 回复语音。支持多 Provider 降级、会话/用户双层密度控制、QQ 号白名单。
+desc: 允许AI 通过工具主动调 TTS 回复语音。支持多 Provider 降级、三级权限管理、长文本分段合并、会话/用户双层密度控制。
 short_desc: AI Voice Assistant
-version: "1.2.0"
+version: "1.3.0"
 astrbot_version: ">=4.16"
 support_platforms:
   - aiocqhttp
