@@ -1,0 +1,51 @@
+{
+  "tts_provider_id": {
+    "description": "首选 TTS Provider ID（留空使用系统默认）。可用 ID 见启动日志。",
+    "type": "string",
+    "default": "",
+    "hint": "留空 = 使用 AstrBot TTS 设置中选定的默认提供商"
+  },
+  "tts_fallback_provider_id": {
+    "description": "兜底 TTS Provider ID（首选不可用时自动切换）。",
+    "type": "string",
+    "default": ""
+  },
+  "voice_enabled": {
+    "description": "启用语音回复功能（总开关）",
+    "type": "bool",
+    "default": true
+  },
+  "sessions_whitelist": {
+    "description": "允许语音的会话 ID 列表。用 /sid 获取会话 ID。留空 = 所有会话放行。",
+    "type": "list",
+    "items": {"type": "string"},
+    "hint": "格式如 aiocqhttp:GroupMessage:123456。为空的列表代表不启用白名单。"
+  },
+  "sessions_blacklist": {
+    "description": "禁止语音的会话 ID 列表（优先于白名单）。",
+    "type": "list",
+    "items": {"type": "string"}
+  },
+  "max_text_length": {
+    "description": "TTS 文本最大长度（超过将告知 LLM 缩短）",
+    "type": "int",
+    "default": 500
+  },
+  "min_text_length": {
+    "description": "TTS 文本最小长度（短于此值跳过）",
+    "type": "int",
+    "default": 2
+  },
+  "rate_limit_seconds": {
+    "description": "每个会话 TTS 调用最小间隔（秒，防刷）",
+    "type": "int",
+    "default": 5
+  },
+  "log_level": {
+    "description": "日志级别",
+    "type": "string",
+    "default": "info",
+    "options": ["info", "debug"],
+    "labels": ["INFO", "DEBUG"]
+  }
+}
