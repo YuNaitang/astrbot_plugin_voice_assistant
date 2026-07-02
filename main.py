@@ -15,6 +15,7 @@ from astrbot.api.provider import ProviderRequest
 from astrbot.api.star import Star
 from astrbot.api import logger
 from astrbot.core.message.components import Plain, Record
+from astrbot.core.platform.message_type import MessageType
 from astrbot.core.provider.provider import TTSProvider
 
 
@@ -255,19 +256,50 @@ class Main(Star):
         if event.is_admin():
             return None
 
-        session_id = str(event.session)
+        session_str = str(event.session)
+        sid = event.session.session_id
+        msg_type = event.session.message_type
 
-        # 黑名单优先
+        # -------------------------------------------------------
+        # 1. 完整 session 字符串的黑/白名单（来自 /sid 格式）
+        # -------------------------------------------------------
         blacklist = self.config.get("sessions_blacklist", []) or []
-        if blacklist and session_id in blacklist:
-            _log_debug(self.config, f"ai_speak: 会话 {session_id} 在黑名单中，拦截")
+        if blacklist and session_str in blacklist:
+            _log_debug(self.config, f"ai_speak: 会话 {session_str} 在黑名单中，拦截")
             return "blacklisted"
 
-        # 白名单
         whitelist = self.config.get("sessions_whitelist", []) or []
-        if whitelist and session_id not in whitelist:
-            _log_debug(self.config, f"ai_speak: 会话 {session_id} 不在白名单中，拦截")
-            return "not_whitelisted"
+        if whitelist and session_str not in whitelist:
+            # session_str 不在白名单中，继续检查 QQ 号格式
+            pass
+        elif whitelist:
+            return None  # 在白名单中，放行
+        # whitelist 为空 = 不启用，继续后续检查
+
+        # -------------------------------------------------------
+        # 2. QQ 号格式的黑/白名单
+        # -------------------------------------------------------
+        if msg_type == MessageType.FRIEND_MESSAGE:
+            qq_black = self.config.get("qq_users_blacklist", []) or []
+            if sid in qq_black:
+                _log_debug(self.config, f"ai_speak: QQ 用户 {sid} 在黑名单中，拦截")
+                return "blacklisted"
+
+            qq_white = self.config.get("qq_users_whitelist", []) or []
+            if qq_white and sid not in qq_white:
+                _log_debug(self.config, f"ai_speak: QQ 用户 {sid} 不在白名单中，拦截")
+                return "not_whitelisted"
+
+        elif msg_type == MessageType.GROUP_MESSAGE:
+            qq_black = self.config.get("qq_groups_blacklist", []) or []
+            if sid in qq_black:
+                _log_debug(self.config, f"ai_speak: QQ 群 {sid} 在黑名单中，拦截")
+                return "blacklisted"
+
+            qq_white = self.config.get("qq_groups_whitelist", []) or []
+            if qq_white and sid not in qq_white:
+                _log_debug(self.config, f"ai_speak: QQ 群 {sid} 不在白名单中，拦截")
+                return "not_whitelisted"
 
         return None
 

@@ -1,13 +1,14 @@
 {
   "tts_provider_id": {
-    "description": "首选 TTS Provider ID（留空使用系统默认）。可用 ID 见启动日志。",
+    "description": "首选 TTS Provider",
     "type": "string",
-    "default": "",
-    "hint": "留空 = 使用 AstrBot TTS 设置中选定的默认提供商"
+    "_special": "select_provider_tts",
+    "default": ""
   },
   "tts_fallback_provider_id": {
-    "description": "兜底 TTS Provider ID（首选不可用时自动切换）。",
+    "description": "兜底 TTS Provider（首选不可用时自动切换）",
     "type": "string",
+    "_special": "select_provider_tts",
     "default": ""
   },
   "voice_enabled": {
@@ -40,6 +41,28 @@
     "description": "每个会话 TTS 调用最小间隔（秒，防刷）",
     "type": "int",
     "default": 5
+  },
+  "qq_users_whitelist": {
+    "description": "允许语音的 QQ 用户号列表（私聊，直接填写QQ号）",
+    "type": "list",
+    "items": {"type": "string"},
+    "hint": "如 [\"123456\", \"789012\"]。为空列表 = 不限制。"
+  },
+  "qq_users_blacklist": {
+    "description": "禁止语音的 QQ 用户号列表",
+    "type": "list",
+    "items": {"type": "string"}
+  },
+  "qq_groups_whitelist": {
+    "description": "允许语音的 QQ 群号列表",
+    "type": "list",
+    "items": {"type": "string"},
+    "hint": "如 [\"123456\", \"789012\"]。为空列表 = 不限制。"
+  },
+  "qq_groups_blacklist": {
+    "description": "禁止语音的 QQ 群号列表",
+    "type": "list",
+    "items": {"type": "string"}
   },
   "density_window_minutes": {
     "description": "会话级语音密度统计窗口（分钟），超限后硬阻断",
