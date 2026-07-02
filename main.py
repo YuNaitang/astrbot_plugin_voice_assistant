@@ -15,6 +15,7 @@ from astrbot.api.provider import ProviderRequest
 from astrbot.api.star import Star
 from astrbot.api import logger
 from astrbot.core.message.components import Plain, Record
+from astrbot.core.message.message_event_result import MessageChain
 from astrbot.core.platform.message_type import MessageType
 from astrbot.core.provider.provider import TTSProvider
 
@@ -201,11 +202,11 @@ class Main(Star):
             return
 
         if len(text) > max_len:
-            # 超长则截断（语音是文字回复的补充，截断损失小于拒绝）
             original_len = len(text)
             text = text[:max_len]
             _log_debug(self.config,
                        f"ai_speak: 文本过长 ({original_len})，已截断至 {max_len} 字符")
+            # 不 return，继续执行（截断后仍可使用）
 
         # ---- 3. 速率限制 ----
         session_id = str(event.session)
@@ -221,9 +222,9 @@ class Main(Star):
         provider = self._get_tts_provider(event)
         if provider is None:
             logger.warning("ai_speak: 未找到可用的 TTS Provider")
-            return
+            return "语音合成失败：未找到可用的 TTS 服务，请检查 AstrBot 的 TTS 提供商配置。"
 
-        # ---- 5. TTS 合成 ----
+        # ---- 6. TTS 合成 ----
         try:
             audio_path = await provider.get_audio(text)
         except Exception as e:
@@ -233,18 +234,19 @@ class Main(Star):
             except Exception:
                 pass
             logger.error(f"ai_speak: TTS 合成失败 (provider={provider_id}): {e}")
-            return
+            return f"语音合成失败（{provider_id}）：{e!s}"
 
         _log_debug(self.config, f"ai_speak: 已合成 [{text[:50].replace(chr(10), ' ')}...] → {audio_path}")
         self._temp_files.append(audio_path)
         self._last_tts_time[session_id] = datetime.now()
         self._record_voice_sent(session_id, user_id)
 
-        # ---- 6. 双输出：文字 + 语音（仅此一条 yield） ----
-        yield event.chain_result([
+        # ---- 7. 发送双输出：文字 + 语音 ----
+        await event.send(MessageChain([
             Plain(text),
             Record.fromFileSystem(audio_path),
-        ])
+        ]))
+        return "语音消息已发送成功"
 
     # ----------------------------------------------------------------
     # 权限检查
