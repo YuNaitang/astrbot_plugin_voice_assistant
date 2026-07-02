@@ -119,6 +119,12 @@
     "default": "",
     "hint": "例: 「用可爱的语气说话」「每句话不超过30字」「喜欢用拟声词结尾，如 喵~」「避免说教口吻」"
   },
+  "backup_session_id": {
+    "description": "备份会话 — 发送语音时同步将文字+音频文件转发到指定会话（如日志群）。留空则不转发",
+    "type": "string",
+    "default": "",
+    "hint": "格式: platform_id:MessageType:session_id。用 /sid 获取当前会话的完整 ID"
+  },
 
   "log_level": {
     "description": "日志级别 — 工具调用和密度判定始终输出 info 日志；debug 额外输出 Provider 扫描等内部信息",
