@@ -13,7 +13,7 @@
 
 ## 前置条件
 
-AstrBot 已注册至少一个 TTS Provider（如 [aliyun-minimax-tts](https://github.com/YuNaitang/aliyun-minimax-tts)）。
+AstrBot 已注册至少一个 TTS Provider。
 
 ## 配置
 
