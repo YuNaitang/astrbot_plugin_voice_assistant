@@ -6,94 +6,94 @@
     "default": ""
   },
   "tts_fallback_provider_id": {
-    "description": "兜底 TTS Provider（首选不可用时自动切换）",
+    "description": "兜底 Provider（首选不可用时自动切换）",
     "type": "string",
     "_special": "select_provider_tts",
     "default": ""
   },
   "voice_enabled": {
-    "description": "启用语音回复功能（总开关）",
+    "description": "启用语音回复",
     "type": "bool",
     "default": true
   },
   "sessions_whitelist": {
-    "description": "允许语音的会话 ID 列表。用 /sid 获取会话 ID。留空 = 所有会话放行。",
+    "description": "允许语音的完整会话 ID，用 /sid 获取。留空=全部放行。",
     "type": "list",
     "items": {"type": "string"},
-    "hint": "格式如 aiocqhttp:GroupMessage:123456。为空的列表代表不启用白名单。"
+    "hint": "格式: aiocqhttp:GroupMessage:123456"
   },
   "sessions_blacklist": {
-    "description": "禁止语音的会话 ID 列表（优先于白名单）。",
+    "description": "禁止语音的完整会话 ID（优先于白名单）",
     "type": "list",
     "items": {"type": "string"}
   },
   "max_text_length": {
-    "description": "TTS 文本最大长度（超过将截断）",
+    "description": "TTS 文本最大长度（超长自动截断）",
     "type": "int",
     "default": 500
   },
   "min_text_length": {
-    "description": "TTS 文本最小长度（短于此值跳过）",
+    "description": "TTS 文本最小长度（短于此值静默跳过）",
     "type": "int",
     "default": 2
   },
   "rate_limit_seconds": {
-    "description": "每个会话 TTS 调用最小间隔（秒，防刷）",
+    "description": "同一会话 TTS 调用间隔（秒）",
     "type": "int",
     "default": 5
   },
   "qq_users_whitelist": {
-    "description": "允许语音的 QQ 用户号列表（私聊，直接填写QQ号）",
+    "description": "允许语音的 QQ 号（私聊）",
     "type": "list",
     "items": {"type": "string"},
-    "hint": "如 [\"123456\", \"789012\"]。为空列表 = 不限制。"
+    "hint": "示例: 123456，留空=不限制"
   },
   "qq_users_blacklist": {
-    "description": "禁止语音的 QQ 用户号列表",
+    "description": "禁止语音的 QQ 号（私聊）",
     "type": "list",
     "items": {"type": "string"}
   },
   "qq_groups_whitelist": {
-    "description": "允许语音的 QQ 群号列表",
+    "description": "允许语音的 QQ 群号",
     "type": "list",
     "items": {"type": "string"},
-    "hint": "如 [\"123456\", \"789012\"]。为空列表 = 不限制。"
+    "hint": "示例: 123456，留空=不限制"
   },
   "qq_groups_blacklist": {
-    "description": "禁止语音的 QQ 群号列表",
+    "description": "禁止语音的 QQ 群号",
     "type": "list",
     "items": {"type": "string"}
   },
   "density_window_minutes": {
-    "description": "会话级语音密度统计窗口（分钟），超限后硬阻断",
+    "description": "会话密度统计窗口（分），超限后硬阻断语音",
     "type": "int",
     "default": 10
   },
   "density_max_count": {
-    "description": "会话级窗口内最大语音次数，超限后完全阻止语音",
+    "description": "窗口内最大语音次数，超限后完全阻止",
     "type": "int",
     "default": 3
   },
   "user_density_window_minutes": {
-    "description": "用户级触发统计窗口（分钟），用于概率降权",
+    "description": "用户触发统计窗口（分），用于概率降权",
     "type": "int",
     "default": 60
   },
   "user_density_threshold": {
-    "description": "用户触发频次阈值，超过后概率开始显著下降",
+    "description": "用户触发频次阈值，超此值概率显著下降",
     "type": "int",
     "default": 5
   },
   "user_density_curve_steepness": {
-    "description": "概率衰减曲线陡峭度（0=关闭用户级降权，越大越陡）",
+    "description": "概率衰减陡峭度（0=关闭降权，越大越陡）",
     "type": "float",
     "default": 0.7
   },
   "voice_prompt_extra": {
-    "description": "额外语音行为控制 Prompt，注入 LLM 系统提示（拟人化定制）",
+    "description": "额外语音 Prompt，注入 LLM 系统提示（拟人化/角色定制）",
     "type": "text",
     "default": "",
-    "hint": "例如：用可爱的语气说话、你是个傲娇角色"
+    "hint": "例如：用可爱的语气说话"
   },
   "log_level": {
     "description": "日志级别",

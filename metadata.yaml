@@ -1,6 +1,6 @@
 name: astrbot_plugin_voice_assistant
 author: YuNaitang
-desc: AI 驱动语音回复。LLM 通过工具调用 TTS，支持首选/兜底提供商选择、会话级权限控制。
+desc: 允许AI 通过工具主动调 TTS 回复语音。支持多 Provider 降级、会话/用户双层密度控制、QQ 号白名单。
 short_desc: AI Voice Assistant
 version: "1.1.0"
 astrbot_version: ">=4.16"

@@ -1,8 +1,8 @@
 """
 AI Voice Assistant — AstrBot 通用 TTS 编排插件
 
-AI 通过 LLM 工具 ai_speak() 主动发起语音合成。
-不绑定特定 TTS 供应商，用户可在管理面板选择首选/兜底 Provider。
+允许AI 通过工具自主调用 TTS 回复语音。
+支持多 Provider 降级、双层密度控制、会话/QQ 号权限管理。
 """
 import os
 import random
@@ -27,7 +27,7 @@ class Main(Star):
         super().__init__(context)
         self.config = config or {}
 
-        # ---------- 运行时状态 ----------
+        # 运行时状态
         self._last_tts_time: dict[str, datetime] = {}
         self._temp_files: list[str] = []
         self._providers_logged: bool = False
@@ -36,11 +36,10 @@ class Main(Star):
         self._voice_timeline: dict[str, list[datetime]] = {}
         self._density_warned: set[str] = set()
 
-        # 用户级密度（概率降权）— session_id → user_id → [timestamps]
+        # 用户级密度（概率降权）
         self._user_trigger_timeline: dict[str, dict[str, list[datetime]]] = {}
 
-        # 尝试在启动时枚举——此时代理商可能尚未初始化
-        self._log_available_tts_providers()
+        self._log_available_tts_providers()  # 可能尚未初始化，静默跳过
         logger.info(
             f"AI Voice Assistant 已加载 "
             f"(enabled={self.config.get('voice_enabled', True)}, "
@@ -58,12 +57,12 @@ class Main(Star):
         self._temp_files.clear()
         logger.info("AI Voice Assistant 已卸载")
 
-    # ----------------------------------------------------------------
+    # ------------------------------------------------
     # Provider 发现
-    # ----------------------------------------------------------------
+    # ------------------------------------------------
 
     def _log_available_tts_providers(self, force: bool = False):
-        """打印所有已注册 TTS Provider（幂等，仅第一次成功时输出）"""
+        """打印所有已注册 TTS Provider（仅第一次成功时输出）"""
         if self._providers_logged and not force:
             return
 
@@ -74,7 +73,7 @@ class Main(Star):
             return
 
         if not providers:
-            return  # 静默等待下次尝试
+            return
 
         logger.info(f"AI Voice Assistant: 发现 {len(providers)} 个 TTS Provider:")
         for p in providers:
@@ -86,9 +85,9 @@ class Main(Star):
 
         self._providers_logged = True
 
-    # ----------------------------------------------------------------
+    # ------------------------------------------------
     # LLM 请求注入（密度提醒 + extra prompt）
-    # ----------------------------------------------------------------
+    # ------------------------------------------------
 
     @filter.on_llm_request()
     async def on_llm_request(self, event: AstrMessageEvent, req: ProviderRequest):
@@ -108,9 +107,9 @@ class Main(Star):
                 )
                 self._density_warned.add(session_id)
 
-    # ----------------------------------------------------------------
+    # ------------------------------------------------
     # 双层密度控制
-    # ----------------------------------------------------------------
+    # ------------------------------------------------
 
     @staticmethod
     def _prune_timeline(
@@ -122,7 +121,7 @@ class Main(Star):
         return [t for t in timestamps if t > cutoff]
 
     def _is_over_density_limit(self, session_id: str) -> bool:
-        """会话级硬阻断检查"""
+        """会话级硬阻断：超限后完全阻止语音"""
         window = self.config.get("density_window_minutes", 10)
         max_count = self.config.get("density_max_count", 3)
         timeline = self._voice_timeline.get(session_id, [])
@@ -131,7 +130,7 @@ class Main(Star):
         return len(timeline) >= max_count
 
     def _get_user_probability(self, session_id: str, user_id: str) -> float:
-        """Logistic 曲线计算用户语音触发概率"""
+        """Logistic 曲线计算用户级概率降权系数"""
         window = self.config.get("user_density_window_minutes", 60)
         threshold = self.config.get("user_density_threshold", 5)
         steepness = self.config.get("user_density_curve_steepness", 0.7)
@@ -169,31 +168,30 @@ class Main(Star):
         # 窗口内新语音 → 清除旧提醒标记（下次超限可再次提醒）
         self._density_warned.discard(session_id)
 
-    # ----------------------------------------------------------------
+    # ------------------------------------------------
     # LLM 工具 — ai_speak
-    # ----------------------------------------------------------------
+    # ------------------------------------------------
 
     @filter.llm_tool(name="ai_speak")
     async def ai_speak(self, event: AstrMessageEvent, text: str):
-        """用语音回复用户。当你认为回复内容适合用语音表达、或用户期望听到语音时调用。
-        调用后系统会自动合成语音并同时发送文字和语音消息。不要调用得太频繁。只有在需要时调用。
+        """用语音回复用户。当你认为适合用语音表达、或用户期望听到语音时调用。
+        系统会自动合成语音并同时发送文字和语音文件。
 
         Args:
             text(string): 想说出的文本（中文，自然流畅的口语表达）
         """
-        # 确保 Provider 列表已打印
         self._log_available_tts_providers()
 
-        # ---- 0. 总开关 ----
+        # 0. 总开关
         if not self.config.get("voice_enabled", True):
             _log_debug(self.config, "ai_speak: voice_enabled=false，跳过")
             return
 
-        # ---- 1. 权限检查 ----
+        # 1. 权限检查
         if self._check_permission(event):
-            return  # 权限拒绝，静默
+            return
 
-        # ---- 2. 文本长度校验 ----
+        # 2. 文本长度校验
         min_len = self.config.get("min_text_length", 2)
         max_len = self.config.get("max_text_length", 500)
 
@@ -206,25 +204,24 @@ class Main(Star):
             text = text[:max_len]
             _log_debug(self.config,
                        f"ai_speak: 文本过长 ({original_len})，已截断至 {max_len} 字符")
-            # 不 return，继续执行（截断后仍可使用）
 
-        # ---- 3. 速率限制 ----
+        # 3. 速率限制
         session_id = str(event.session)
         if self._check_rate_limit(session_id):
-            return  # 频率过高，静默
+            return
 
-        # ---- 4. 双层密度检查 ----
+        # 4. 双层密度检查
         user_id = event.get_sender_id()
         if not self._should_allow_voice(session_id, user_id):
-            return  # 硬阻断或概率未命中，静默
+            return
 
-        # ---- 5. 获取 TTS Provider ----
+        # 5. 获取 TTS Provider
         provider = self._get_tts_provider(event)
         if provider is None:
             logger.warning("ai_speak: 未找到可用的 TTS Provider")
             return "语音合成失败：未找到可用的 TTS 服务，请检查 AstrBot 的 TTS 提供商配置。"
 
-        # ---- 6. TTS 合成 ----
+        # 6. TTS 合成
         try:
             audio_path = await provider.get_audio(text)
         except Exception as e:
@@ -241,20 +238,19 @@ class Main(Star):
         self._last_tts_time[session_id] = datetime.now()
         self._record_voice_sent(session_id, user_id)
 
-        # ---- 7. 发送双输出：文字 + 语音 ----
+        # 7. 发送：文字 + 语音
         await event.send(MessageChain([
             Plain(text),
             Record.fromFileSystem(audio_path),
         ]))
         return "语音消息已发送成功"
 
-    # ----------------------------------------------------------------
+    # ------------------------------------------------
     # 权限检查
-    # ----------------------------------------------------------------
+    # ------------------------------------------------
 
     def _check_permission(self, event: AstrMessageEvent) -> Optional[str]:
-        """返回 None = 通过，非 None = 被拦截的原因"""
-        # AstrBot 管理员直接放行
+        """None=放行，str=拦截原因"""
         if event.is_admin():
             return None
 
@@ -262,9 +258,7 @@ class Main(Star):
         sid = event.session.session_id
         msg_type = event.session.message_type
 
-        # -------------------------------------------------------
-        # 1. 完整 session 字符串的黑/白名单（来自 /sid 格式）
-        # -------------------------------------------------------
+        # 1. 完整 session 黑/白名单（/sid 格式）
         blacklist = self.config.get("sessions_blacklist", []) or []
         if blacklist and session_str in blacklist:
             _log_debug(self.config, f"ai_speak: 会话 {session_str} 在黑名单中，拦截")
@@ -272,15 +266,11 @@ class Main(Star):
 
         whitelist = self.config.get("sessions_whitelist", []) or []
         if whitelist and session_str not in whitelist:
-            # session_str 不在白名单中，继续检查 QQ 号格式
-            pass
+            pass  # 不在完整 session 白名单中，继续检查 QQ 号
         elif whitelist:
-            return None  # 在白名单中，放行
-        # whitelist 为空 = 不启用，继续后续检查
+            return None
 
-        # -------------------------------------------------------
-        # 2. QQ 号格式的黑/白名单
-        # -------------------------------------------------------
+        # 2. QQ 号黑/白名单
         if msg_type == MessageType.FRIEND_MESSAGE:
             qq_black = self.config.get("qq_users_blacklist", []) or []
             if sid in qq_black:
@@ -305,11 +295,12 @@ class Main(Star):
 
         return None
 
-    # ----------------------------------------------------------------
+    # ------------------------------------------------
     # Provider 选取：首选 → 兜底 → 系统默认
-    # ----------------------------------------------------------------
+    # ------------------------------------------------
 
     def _get_tts_provider(self, event: AstrMessageEvent) -> Optional[TTSProvider]:
+        """三级降级获取 TTS Provider"""
         provider = self._resolve_provider(
             self.config.get("tts_provider_id", "")
         )
@@ -326,26 +317,24 @@ class Main(Star):
         return self.context.get_using_tts_provider(event.unified_msg_origin)
 
     def _resolve_provider(self, provider_id: str) -> Optional[TTSProvider]:
+        """按 ID 查找 Provider，过滤非 TTS 类型"""
         if not provider_id:
             return None
         p = self.context.get_provider_by_id(provider_id)
         if p is None:
-            logger.warning(
-                f"ai_speak: Provider ID '{provider_id}' 未找到，请检查 _conf_schema.json 配置"
-            )
+            logger.warning(f"ai_speak: Provider ID '{provider_id}' 未找到")
             return None
         if not isinstance(p, TTSProvider):
-            logger.warning(
-                f"ai_speak: Provider '{provider_id}' 类型不是 TTSProvider（got {type(p).__name__}）"
-            )
+            logger.warning(f"ai_speak: Provider '{provider_id}' 不是 TTSProvider（{type(p).__name__}）")
             return None
         return p
 
-    # ----------------------------------------------------------------
+    # ------------------------------------------------
     # 速率限制
-    # ----------------------------------------------------------------
+    # ------------------------------------------------
 
     def _check_rate_limit(self, session_id: str) -> Optional[str]:
+        """检查会话级速率限制"""
         rate_seconds = self.config.get("rate_limit_seconds", 5)
         if rate_seconds <= 0:
             return None
