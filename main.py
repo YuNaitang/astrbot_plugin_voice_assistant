@@ -454,10 +454,11 @@ class Main(Star):
                 return f"语音合成失败（{provider_id}）：{e!s}"
 
         # ================================================
-        # 7. 合并音频（多段时尝试合并为一条）
+        # 7. 合并音频（仅在启用且多段时尝试）
         # ================================================
-        merge_timeout = self.config.get("tts_merge_timeout_seconds", 60)
-        if len(audio_paths) > 1:
+        merge_enabled = self.config.get("tts_merge_enabled", False)
+        if merge_enabled and len(audio_paths) > 1:
+            merge_timeout = self.config.get("tts_merge_timeout_seconds", 30)
             logger.info(
                 f"[ai_speak] 开始合并 {len(audio_paths)} 段音频 "
                 f"(timeout={merge_timeout}s)"
@@ -472,8 +473,11 @@ class Main(Star):
                     f"[ai_speak] 音频合并超时 ({merge_timeout}s)，将分段发送"
                 )
                 final_audio = None
+        elif len(audio_paths) == 1:
+            final_audio = audio_paths[0]
         else:
-            final_audio = audio_paths[0] if audio_paths else None
+            # 多段但未启用合并 → 直接分段发送
+            final_audio = None
 
         # ================================================
         # 8. 发送消息

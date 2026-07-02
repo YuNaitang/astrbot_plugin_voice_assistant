@@ -1,132 +1,133 @@
 {
-  "tts_provider_id": {
-    "description": "首选 TTS Provider",
-    "type": "string",
-    "_special": "select_provider_tts",
-    "default": ""
-  },
-  "tts_fallback_provider_id": {
-    "description": "兜底 Provider（首选不可用时自动切换）",
-    "type": "string",
-    "_special": "select_provider_tts",
-    "default": ""
-  },
   "voice_enabled": {
-    "description": "启用语音回复",
+    "description": "全局开关 — 关闭后所有语音功能停止，AI 不会调用 ai_speak 工具",
     "type": "bool",
     "default": true
   },
 
-  "session_permissions": {
-    "description": "会话权限等级。格式: session_id:等级。0=无限制 1=基准限制 2=完全限制。可用 /voice_perm 指令管理。",
-    "type": "list",
-    "items": {"type": "string"},
-    "hint": "格式: aiocqhttp:GroupMessage:123456:0 或 QQ号:0"
+  "tts_provider_id": {
+    "description": "首选 TTS 引擎 — 语音合成服务商。留空则使用系统全局默认",
+    "type": "string",
+    "_special": "select_provider_tts",
+    "default": "",
+    "hint": "Aliyun MiniMax TTS 的 ID 通常是 tts-aliyun-minimax"
   },
-  "default_permission_level": {
-    "description": "默认权限等级（0=无限制, 1=基准限制, 2=完全限制）。管理员私聊默认始终为 0。",
-    "type": "int",
-    "default": 1,
-    "options": [0, 1, 2],
-    "labels": ["无限制", "基准限制", "完全限制"]
-  },
-
-  "sessions_whitelist": {
-    "description": "[已废弃] 请改用 session_permissions。允许语音的完整会话 ID。",
-    "type": "list",
-    "items": {"type": "string"},
-    "hint": "已废弃，请使用 session_permissions"
-  },
-  "sessions_blacklist": {
-    "description": "[兼容] 禁止语音的完整会话 ID，自动映射为权限等级 2。建议迁移到 session_permissions。",
-    "type": "list",
-    "items": {"type": "string"}
+  "tts_fallback_provider_id": {
+    "description": "备选 TTS 引擎 — 首选不可用时自动切换",
+    "type": "string",
+    "_special": "select_provider_tts",
+    "default": "",
+    "hint": "留空则不启用降级"
   },
 
-  "max_text_length": {
-    "description": "TTS 文本最大长度。超长文本将自动分段处理而非截断。",
-    "type": "int",
-    "default": 500
-  },
   "min_text_length": {
-    "description": "TTS 文本最小长度（短于此值静默跳过）",
+    "description": "最小长度 — 短于此值不合成语音（避免 AI 对单个字/标点发语音）",
     "type": "int",
-    "default": 2
+    "default": 2,
+    "hint": "建议 2 ~ 10"
+  },
+  "max_text_length": {
+    "description": "文本上限 — 超长文本不会截断，而是自动分段、逐段合成、再尝试合并为一条语音",
+    "type": "int",
+    "default": 500,
+    "hint": "仅作参考上限，实际会分段处理"
   },
   "tts_segment_max_chars": {
-    "description": "长文本分段时每段最大字符数（按换行符 → 句号分割，单句超长时强制切分）",
+    "description": "分段大小 — 长文本按「换行 → 句号」分割后每段最多 N 字符，单句超长则强制切分",
     "type": "int",
-    "default": 80
+    "default": 80,
+    "hint": "建议 60 ~ 120。越小越自然但段数越多"
+  },
+  "tts_merge_enabled": {
+    "description": "合并多段语音 — 长文本分段合成后是否尝试合并为一条。⚠️ 开启会增加工具耗时，可能触发 AstrBot 60s 工具超时",
+    "type": "bool",
+    "default": false,
+    "hint": "建议保持关闭（分段发送更稳）。需安装 pydub / ffmpeg。开启后单次合并最多等待下方设置的秒数。"
   },
   "tts_merge_timeout_seconds": {
-    "description": "多段音频合并超时（秒），超时后改为分段发送",
+    "description": "合并超时 — 启用合并时最多等待 N 秒，超时自动降级为分段发送",
     "type": "int",
-    "default": 60
+    "default": 30,
+    "hint": "默认 30s，留足余量给 TTS 合成阶段，确保总耗时 < 60s"
   },
 
   "rate_limit_seconds": {
-    "description": "同一会话 TTS 调用间隔（秒），仅基准限制等级生效",
+    "description": "调用间隔 — 同一会话两次语音至少相隔 N 秒。仅「基准限制」等级生效",
     "type": "int",
-    "default": 5
-  },
-  "qq_users_whitelist": {
-    "description": "允许语音的 QQ 号（私聊）",
-    "type": "list",
-    "items": {"type": "string"},
-    "hint": "示例: 123456，留空=不限制"
-  },
-  "qq_users_blacklist": {
-    "description": "禁止语音的 QQ 号（私聊）",
-    "type": "list",
-    "items": {"type": "string"}
-  },
-  "qq_groups_whitelist": {
-    "description": "允许语音的 QQ 群号",
-    "type": "list",
-    "items": {"type": "string"},
-    "hint": "示例: 123456，留空=不限制"
-  },
-  "qq_groups_blacklist": {
-    "description": "禁止语音的 QQ 群号",
-    "type": "list",
-    "items": {"type": "string"}
+    "default": 5,
+    "hint": "设为 0 则不限制速率"
   },
   "density_window_minutes": {
-    "description": "会话密度统计窗口（分），超限后硬阻断语音",
+    "description": "会话密度窗口 — 在 N 分钟内统计语音数量，超限则硬阻断。仅「基准限制」等级生效",
     "type": "int",
-    "default": 10
+    "default": 10,
+    "hint": "与下方「最大次数」配合使用"
   },
   "density_max_count": {
-    "description": "窗口内最大语音次数，超限后完全阻止",
+    "description": "会话密度上限 — 窗口内最多发送 N 条语音，超限后完全阻止直到窗口滑出",
     "type": "int",
-    "default": 3
+    "default": 3,
+    "hint": "例: 窗口10分钟 + 上限3条 = 10分钟内最多3条语音"
   },
   "user_density_window_minutes": {
-    "description": "用户触发统计窗口（分），用于概率降权",
+    "description": "用户密度窗口 — 统计单用户在 N 分钟内的语音触发次数，用于概率衰减",
     "type": "int",
-    "default": 60
+    "default": 60,
+    "hint": "较会话密度更宽松，用于长期统计"
   },
   "user_density_threshold": {
-    "description": "用户触发频次阈值，超此值概率显著下降",
+    "description": "用户密度阈值 — 超过此次数后概率开始下降（Logistic 曲线）",
     "type": "int",
-    "default": 5
+    "default": 5,
+    "hint": "例: 1小时内触发超过5次后，继续触发的概率逐渐降低"
   },
   "user_density_curve_steepness": {
-    "description": "概率衰减陡峭度（0=关闭降权，越大越陡）",
+    "description": "概率衰减陡峭度 — 值越大衰减越急剧。设为 0 则完全关闭用户级概率降权",
     "type": "float",
-    "default": 0.7
+    "default": 0.7,
+    "hint": "建议 0.3 ~ 1.5。0 = 关闭降权"
   },
+
+  "default_permission_level": {
+    "description": "默认权限等级 — 新会话如果没有单独配置，使用此等级",
+    "type": "int",
+    "default": 1,
+    "options": [0, 1, 2],
+    "labels": [
+      "0 · 无限制 — 不检查速率和密度，随时可发语音",
+      "1 · 基准限制 — 受速率间隔和双层密度控制约束",
+      "2 · 完全限制 — 禁止语音（即黑名单）"
+    ],
+    "hint": "管理员私聊始终为「无限制」。通过 /voice_perm 指令或下方配置为特定会话覆盖。"
+  },
+  "session_permissions": {
+    "description": "会话权限覆盖 — 为特定会话指定不同于默认的权限等级。支持完整 session ID 或 QQ 号",
+    "type": "list",
+    "items": {"type": "string"},
+    "hint": "格式: 会话ID:等级。例: 123456:0（QQ号123456无限制） | 用 /sid 获取完整 session ID | 推荐使用 /voice_perm 指令管理"
+  },
+  "sessions_blacklist": {
+    "description": "[旧版 · 兼容保留] 禁止语音的会话 ID 列表。已自动映射为权限等级 2，建议迁移到上方的 session_permissions",
+    "type": "list",
+    "items": {"type": "string"},
+    "hint": "此字段仅为兼容旧版配置保留，新配置请使用 session_permissions"
+  },
+
   "voice_prompt_extra": {
-    "description": "额外语音 Prompt，注入 LLM 系统提示（拟人化/角色定制）",
+    "description": "LLM 行为注入 — 追加到系统提示词中的语音行为规则，用于拟人化或角色定制",
     "type": "text",
     "default": "",
-    "hint": "例如：用可爱的语气说话"
+    "hint": "例: 「用可爱的语气说话」「每句话不超过30字」「喜欢用拟声词结尾，如 喵~」「避免说教口吻」"
   },
+
   "log_level": {
-    "description": "日志级别（工具调用和密度判定始终输出 info 日志）",
+    "description": "日志级别 — 工具调用和密度判定始终输出 info 日志；debug 额外输出 Provider 扫描等内部信息",
     "type": "string",
     "default": "info",
     "options": ["info", "debug"],
-    "labels": ["INFO", "DEBUG"]
+    "labels": [
+      "INFO — 仅记录关键操作（调用、权限、合成、发送）",
+      "DEBUG — 记录所有内部调试信息"
+    ]
   }
 }
