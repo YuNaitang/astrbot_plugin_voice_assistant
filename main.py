@@ -5,10 +5,13 @@ AI 通过 LLM 工具 ai_speak() 主动发起语音合成。
 不绑定特定 TTS 供应商，用户可在管理面板选择首选/兜底 Provider。
 """
 import os
-from datetime import datetime
+import random
+from datetime import datetime, timedelta
+from math import exp
 from typing import Optional
 
 from astrbot.api.event import filter, AstrMessageEvent
+from astrbot.api.provider import ProviderRequest
 from astrbot.api.star import Star
 from astrbot.api import logger
 from astrbot.core.message.components import Plain, Record
@@ -26,6 +29,13 @@ class Main(Star):
         self._last_tts_time: dict[str, datetime] = {}
         self._temp_files: list[str] = []
         self._providers_logged: bool = False
+
+        # 会话级密度（硬阻断）
+        self._voice_timeline: dict[str, list[datetime]] = {}
+        self._density_warned: set[str] = set()
+
+        # 用户级密度（概率降权）— session_id → user_id → [timestamps]
+        self._user_trigger_timeline: dict[str, dict[str, list[datetime]]] = {}
 
         # 尝试在启动时枚举——此时代理商可能尚未初始化
         self._log_available_tts_providers()
@@ -75,6 +85,89 @@ class Main(Star):
         self._providers_logged = True
 
     # ----------------------------------------------------------------
+    # LLM 请求注入（密度提醒 + extra prompt）
+    # ----------------------------------------------------------------
+
+    @filter.on_llm_request()
+    async def on_llm_request(self, event: AstrMessageEvent, req: ProviderRequest):
+        """每次 LLM 请求前，注入语音相关系统提示"""
+        # —— 注入 extra prompt ——
+        extra = self.config.get("voice_prompt_extra", "")
+        if extra:
+            req.system_prompt += f"\n\n[语音行为规则]\n{extra}"
+
+        # —— 会话级密度超限提醒（每个窗口只提醒一次） ——
+        session_id = str(event.session)
+        if self._is_over_density_limit(session_id):
+            if session_id not in self._density_warned:
+                req.system_prompt += (
+                    "\n\n[注意] 你最近已经发送了很多语音消息。"
+                    "在收到重置通知之前，请不要再使用 ai_speak 工具。"
+                )
+                self._density_warned.add(session_id)
+
+    # ----------------------------------------------------------------
+    # 双层密度控制
+    # ----------------------------------------------------------------
+
+    @staticmethod
+    def _prune_timeline(
+        timestamps: list[datetime], window_minutes: int
+    ) -> list[datetime]:
+        """裁剪滑动窗口外的时间戳"""
+        now = datetime.now()
+        cutoff = now - timedelta(minutes=window_minutes)
+        return [t for t in timestamps if t > cutoff]
+
+    def _is_over_density_limit(self, session_id: str) -> bool:
+        """会话级硬阻断检查"""
+        window = self.config.get("density_window_minutes", 10)
+        max_count = self.config.get("density_max_count", 3)
+        timeline = self._voice_timeline.get(session_id, [])
+        timeline = self._prune_timeline(timeline, window)
+        self._voice_timeline[session_id] = timeline
+        return len(timeline) >= max_count
+
+    def _get_user_probability(self, session_id: str, user_id: str) -> float:
+        """Logistic 曲线计算用户语音触发概率"""
+        window = self.config.get("user_density_window_minutes", 60)
+        threshold = self.config.get("user_density_threshold", 5)
+        steepness = self.config.get("user_density_curve_steepness", 0.7)
+
+        if steepness <= 0:
+            return 1.0
+
+        user_map = self._user_trigger_timeline.get(session_id, {})
+        timeline = self._prune_timeline(user_map.get(user_id, []), window)
+        user_map[user_id] = timeline
+        self._user_trigger_timeline[session_id] = user_map
+
+        count = len(timeline)
+        prob = 1.0 / (1.0 + exp(steepness * (count - threshold)))
+        return prob
+
+    def _should_allow_voice(self, session_id: str, user_id: str) -> bool:
+        """综合决策：先会话硬阻断，再用户概率降权"""
+        if self._is_over_density_limit(session_id):
+            return False
+
+        prob = self._get_user_probability(session_id, user_id)
+        if prob < 1.0:
+            _log_debug(self.config, f"ai_speak: user_prob={prob:.3f}")
+            if random.random() >= prob:
+                return False
+
+        return True
+
+    def _record_voice_sent(self, session_id: str, user_id: str):
+        """成功发送语音后记录时间戳"""
+        self._voice_timeline.setdefault(session_id, []).append(datetime.now())
+        user_map = self._user_trigger_timeline.setdefault(session_id, {})
+        user_map.setdefault(user_id, []).append(datetime.now())
+        # 窗口内新语音 → 清除旧提醒标记（下次超限可再次提醒）
+        self._density_warned.discard(session_id)
+
+    # ----------------------------------------------------------------
     # LLM 工具 — ai_speak
     # ----------------------------------------------------------------
 
@@ -118,7 +211,12 @@ class Main(Star):
         if self._check_rate_limit(session_id):
             return  # 频率过高，静默
 
-        # ---- 4. 获取 TTS Provider ----
+        # ---- 4. 双层密度检查 ----
+        user_id = event.get_sender_id()
+        if not self._should_allow_voice(session_id, user_id):
+            return  # 硬阻断或概率未命中，静默
+
+        # ---- 5. 获取 TTS Provider ----
         provider = self._get_tts_provider(event)
         if provider is None:
             logger.warning("ai_speak: 未找到可用的 TTS Provider")
@@ -139,6 +237,7 @@ class Main(Star):
         _log_debug(self.config, f"ai_speak: 已合成 [{text[:50].replace(chr(10), ' ')}...] → {audio_path}")
         self._temp_files.append(audio_path)
         self._last_tts_time[session_id] = datetime.now()
+        self._record_voice_sent(session_id, user_id)
 
         # ---- 6. 双输出：文字 + 语音（仅此一条 yield） ----
         yield event.chain_result([

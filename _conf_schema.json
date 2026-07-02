@@ -27,7 +27,7 @@
     "items": {"type": "string"}
   },
   "max_text_length": {
-    "description": "TTS 文本最大长度（超过将告知 LLM 缩短）",
+    "description": "TTS 文本最大长度（超过将截断）",
     "type": "int",
     "default": 500
   },
@@ -40,6 +40,37 @@
     "description": "每个会话 TTS 调用最小间隔（秒，防刷）",
     "type": "int",
     "default": 5
+  },
+  "density_window_minutes": {
+    "description": "会话级语音密度统计窗口（分钟），超限后硬阻断",
+    "type": "int",
+    "default": 10
+  },
+  "density_max_count": {
+    "description": "会话级窗口内最大语音次数，超限后完全阻止语音",
+    "type": "int",
+    "default": 3
+  },
+  "user_density_window_minutes": {
+    "description": "用户级触发统计窗口（分钟），用于概率降权",
+    "type": "int",
+    "default": 60
+  },
+  "user_density_threshold": {
+    "description": "用户触发频次阈值，超过后概率开始显著下降",
+    "type": "int",
+    "default": 5
+  },
+  "user_density_curve_steepness": {
+    "description": "概率衰减曲线陡峭度（0=关闭用户级降权，越大越陡）",
+    "type": "float",
+    "default": 0.7
+  },
+  "voice_prompt_extra": {
+    "description": "额外语音行为控制 Prompt，注入 LLM 系统提示（拟人化定制）",
+    "type": "text",
+    "default": "",
+    "hint": "例如：用可爱的语气说话、你是个傲娇角色"
   },
   "log_level": {
     "description": "日志级别",
