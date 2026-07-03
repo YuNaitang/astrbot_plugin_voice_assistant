@@ -23,6 +23,7 @@ from astrbot.core.message.message_event_result import MessageChain
 from astrbot.core.platform.message_type import MessageType
 from astrbot.core.platform.message_session import MessageSession as MessageSesion
 from astrbot.core.provider.provider import TTSProvider
+from astrbot.core.utils.astrbot_path import get_astrbot_plugin_data_path
 
 
 # ====================================================================
@@ -59,6 +60,11 @@ class Main(Star):
         self._perm_cache: dict[str, int] = {}
         self._load_permission_cache()
 
+        # 本地音频存储
+        self._audio_storage_enabled = False
+        self._audio_storage_dir: Optional[str] = None
+        self._init_local_storage()
+
         self._log_available_tts_providers()
         logger.info(
             f"AI Voice Assistant 已加载 "
@@ -76,6 +82,368 @@ class Main(Star):
                 pass
         self._temp_files.clear()
         logger.info("AI Voice Assistant 已卸载")
+
+    # ------------------------------------------------
+    # 本地音频存储 + 7 天清理
+    # ------------------------------------------------
+
+    def _init_local_storage(self) -> None:
+        """初始化本地音频归档目录，使用 AstrBot 官方插件数据目录。"""
+        raw = (self.config.get("local_audio_dir") or "").strip()
+        if not raw:
+            raw = os.path.join(
+                get_astrbot_plugin_data_path(),
+                "astrbot_plugin_voice_assistant",
+                "tts_archive",
+            )
+        raw = os.path.realpath(raw)
+        try:
+            os.makedirs(raw, exist_ok=True)
+            self._audio_storage_dir = raw
+            self._audio_storage_enabled = True
+            # 启动时清理过期文件
+            retention = self.config.get("local_audio_retention_days", 7)
+            cleaned = self._cleanup_old_audio(retention)
+            logger.info(
+                f"AI Voice Assistant: 音频存储目录 {raw} "
+                f"(保留 {retention} 天，本次清理 {cleaned} 个)"
+            )
+        except OSError as e:
+            logger.warning(f"AI Voice Assistant: 无法创建音频存储目录 {raw}: {e}")
+            self._audio_storage_enabled = False
+
+    def _cleanup_old_audio(self, retention_days: int = 7) -> int:
+        """删除超过 retention_days 天的音频文件。返回删除数量。"""
+        if not self._audio_storage_dir:
+            return 0
+        cutoff = datetime.now() - timedelta(days=retention_days)
+        count = 0
+        try:
+            for fname in os.listdir(self._audio_storage_dir):
+                fpath = os.path.join(self._audio_storage_dir, fname)
+                if not os.path.isfile(fpath):
+                    continue
+                mtime = datetime.fromtimestamp(os.path.getmtime(fpath))
+                if mtime < cutoff:
+                    os.remove(fpath)
+                    count += 1
+        except OSError as e:
+            logger.warning(f"[tts_storage] 清理音频文件失败: {e}")
+        return count
+
+    def _save_audio_file(self, audio_path: str) -> Optional[str]:
+        """将临时音频文件移到本地持久目录。返回持久化路径，失败返回 None。"""
+        if not self._audio_storage_enabled or not self._audio_storage_dir:
+            return None
+        try:
+            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+            uid = random.randint(100000, 999999)
+            basename = f"tts_{ts}_{uid}.wav"
+            dest = os.path.join(self._audio_storage_dir, basename)
+            # 避免同名覆盖
+            counter = 1
+            while os.path.exists(dest):
+                dest = os.path.join(
+                    self._audio_storage_dir,
+                    f"tts_{ts}_{uid}_{counter}.wav",
+                )
+                counter += 1
+            os.rename(audio_path, dest)
+            logger.info(f"[tts_storage] 已归档: {dest}")
+            return dest
+        except Exception as e:
+            logger.warning(f"[tts_storage] 归档失败: {e}")
+            return None
+
+    def _cloud_backup(self, file_path: str, text: str) -> None:
+        """将已归档的音频文件上传到云端存储，异步进行，失败不阻塞。"""
+        if not self.config.get("cloud_backup_enabled", False):
+            return
+
+        backend = self.config.get("cloud_backend", "custom")
+
+        dispatch = {
+            "custom": self._cloud_put_custom,
+            "s3": self._cloud_put_s3,
+            "webdav": self._cloud_put_webdav,
+            "smb": self._cloud_put_smb,
+        }
+        method = dispatch.get(backend)
+        if not method:
+            logger.warning(f"[tts_cloud] 未知后端类型: {backend}")
+            return
+
+        try:
+            method(file_path, text)
+        except Exception as e:
+            logger.warning(f"[tts_cloud] {backend} 上传启动失败: {e}")
+
+    # ----------------------------------------------------------------
+    # 云存储后端
+    # ----------------------------------------------------------------
+
+    def _cloud_put_custom(self, file_path: str, text: str) -> None:
+        """自定义 API: multipart/form-data 上传 + JSON 路径提取 URL。"""
+        url = (self.config.get("cloud_custom_url") or "").strip()
+        if not url:
+            logger.warning("[tts_cloud] cloud_custom_url 未配置，跳过")
+            return
+
+        headers_raw = (self.config.get("cloud_custom_headers") or "").strip()
+        body_raw = (self.config.get("cloud_custom_body") or "").strip()
+        result_path = (self.config.get("cloud_custom_result_path") or "").strip()
+
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        uid = f"{random.randint(100000, 999999):06d}"
+        filename = f"tts_{ts}_{uid}.wav"
+
+        cmd = ["curl", "-f", "-s", "-X", "POST"]
+
+        # 请求头
+        for line in headers_raw.splitlines():
+            line = line.strip()
+            if ":" in line:
+                cmd.extend(["-H", line])
+
+        # 文件字段（固定为 file）
+        cmd.extend(["-F", f"file=@{file_path};filename={filename}"])
+
+        # 请求体额外字段
+        if body_raw:
+            try:
+                import json as _json
+                body_obj = _json.loads(body_raw)
+                for k, v in body_obj.items():
+                    cmd.extend(["-F", f"{k}={v}"])
+            except _json.JSONDecodeError:
+                logger.warning("[tts_cloud] cloud_custom_body 不是合法 JSON，跳过")
+                logger.warning(f"[tts_cloud] 收到: {body_raw!r}")
+
+        cmd.append(url)
+
+        # 标记是否需要解析返回 URL
+        needs_extract = bool(result_path)
+
+        async def _upload():
+            try:
+                proc = await asyncio.create_subprocess_exec(
+                    *cmd,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+                stdout, stderr = await asyncio.wait_for(
+                    proc.communicate(), timeout=120
+                )
+                if proc.returncode != 0:
+                    logger.warning(
+                        f"[tts_cloud] 自定义上传失败 (exit={proc.returncode}): "
+                        f"{stderr.decode()[:200]}"
+                    )
+                    return
+                body = stdout.decode()
+                if needs_extract:
+                    url = self._extract_json_path(body, result_path)
+                    if url:
+                        logger.info(f"[tts_cloud] 自定义上传成功 → {url}")
+                    else:
+                        logger.warning(
+                            f"[tts_cloud] 自定义上传成功，但未能从响应提取 URL "
+                            f"(path={result_path})"
+                        )
+                        logger.debug(f"[tts_cloud] 响应体: {body[:500]}")
+                else:
+                    logger.info("[tts_cloud] 自定义上传成功")
+            except asyncio.TimeoutError:
+                logger.warning("[tts_cloud] 自定义上传超时")
+            except Exception as e:
+                logger.warning(f"[tts_cloud] 自定义上传异常: {e}")
+
+        asyncio.create_task(_upload())
+
+    @staticmethod
+    def _extract_json_path(body: str, json_path: str) -> Optional[str]:
+        """从 JSON 字符串中按点号路径提取值。例: 'data.url' → result['data']['url']"""
+        import json as _json
+        try:
+            obj = _json.loads(body)
+            for key in json_path.split("."):
+                if isinstance(obj, dict):
+                    obj = obj.get(key)
+                else:
+                    return None
+            return str(obj) if obj is not None else None
+        except (_json.JSONDecodeError, TypeError, AttributeError):
+            return None
+
+    def _cloud_put_s3(self, file_path: str, text: str) -> None:
+        """S3 兼容存储: 使用 curl --aws-sigv4 签名上传。"""
+        endpoint = (self.config.get("cloud_s3_endpoint") or "").strip()
+        region = (self.config.get("cloud_s3_region") or "").strip()
+        bucket = (self.config.get("cloud_s3_bucket") or "").strip()
+        access_key = (self.config.get("cloud_s3_access_key") or "").strip()
+        secret_key = (self.config.get("cloud_s3_secret_key") or "").strip()
+        path_style = self.config.get("cloud_s3_path_style", True)
+
+        missing = []
+        if not endpoint:
+            missing.append("cloud_s3_endpoint")
+        if not region:
+            missing.append("cloud_s3_region")
+        if not bucket:
+            missing.append("cloud_s3_bucket")
+        if not access_key or not secret_key:
+            missing.append("cloud_s3_access_key/secret_key")
+        if missing:
+            logger.warning(f"[tts_cloud] S3 配置不完整: {', '.join(missing)}，跳过")
+            return
+
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        uid = f"{random.randint(100000, 999999):06d}"
+        key = f"tts_{ts}_{uid}.wav"
+
+        # 构造上传 URL
+        if path_style:
+            upload_url = f"{endpoint.rstrip('/')}/{bucket}/{key}"
+        else:
+            upload_url = f"https://{bucket}.{endpoint.rstrip('/').lstrip('https://').lstrip('http://')}/{key}"
+
+        cmd = [
+            "curl", "-f", "-s",
+            "--aws-sigv4", f"aws:amz:{region}:s3",
+            "--user", f"{access_key}:{secret_key}",
+            "-X", "PUT",
+            "--data-binary", f"@{file_path}",
+            upload_url,
+        ]
+
+        async def _upload():
+            try:
+                proc = await asyncio.create_subprocess_exec(
+                    *cmd,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+                _, stderr = await asyncio.wait_for(proc.communicate(), timeout=120)
+                if proc.returncode == 0:
+                    logger.info(f"[tts_cloud] S3 上传成功: {upload_url}")
+                else:
+                    logger.warning(
+                        f"[tts_cloud] S3 上传失败 (exit={proc.returncode}): "
+                        f"{stderr.decode()[:200]}"
+                    )
+            except asyncio.TimeoutError:
+                logger.warning("[tts_cloud] S3 上传超时")
+            except Exception as e:
+                logger.warning(f"[tts_cloud] S3 上传异常: {e}")
+
+        asyncio.create_task(_upload())
+
+    def _cloud_put_webdav(self, file_path: str, text: str) -> None:
+        """WebDAV: 使用 curl -T 上传。"""
+        url = (self.config.get("cloud_webdav_url") or "").strip()
+        username = (self.config.get("cloud_webdav_username") or "").strip()
+        password = (self.config.get("cloud_webdav_password") or "").strip()
+
+        if not url:
+            logger.warning("[tts_cloud] cloud_webdav_url 未配置，跳过")
+            return
+
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        uid = f"{random.randint(100000, 999999):06d}"
+        filename = f"tts_{ts}_{uid}.wav"
+
+        cmd = ["curl", "-f", "-s", "-T", file_path]
+        if username and password:
+            cmd.extend(["-u", f"{username}:{password}"])
+        cmd.append(f"{url.rstrip('/')}/{filename}")
+
+        async def _upload():
+            try:
+                proc = await asyncio.create_subprocess_exec(
+                    *cmd,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+                _, stderr = await asyncio.wait_for(proc.communicate(), timeout=120)
+                if proc.returncode == 0:
+                    logger.info(f"[tts_cloud] WebDAV 上传成功: {filename}")
+                else:
+                    logger.warning(
+                        f"[tts_cloud] WebDAV 上传失败 (exit={proc.returncode}): "
+                        f"{stderr.decode()[:200]}"
+                    )
+            except asyncio.TimeoutError:
+                logger.warning("[tts_cloud] WebDAV 上传超时")
+            except Exception as e:
+                logger.warning(f"[tts_cloud] WebDAV 上传异常: {e}")
+
+        asyncio.create_task(_upload())
+
+    def _cloud_put_smb(self, file_path: str, text: str) -> None:
+        """SMB 共享: 使用 smbclient 或 shutil.copy。"""
+        share = (self.config.get("cloud_smb_share") or "").strip()
+        username = (self.config.get("cloud_smb_username") or "").strip()
+        password = (self.config.get("cloud_smb_password") or "").strip()
+        domain = (self.config.get("cloud_smb_domain") or "").strip()
+
+        if not share:
+            logger.warning("[tts_cloud] cloud_smb_share 未配置，跳过")
+            return
+
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        uid = f"{random.randint(100000, 999999):06d}"
+        filename = f"tts_{ts}_{uid}.wav"
+
+        async def _upload():
+            try:
+                # 先尝试 smbclient
+                if username:
+                    user_part = f"{domain}\\{username}" if domain else username
+                    auth = f"{user_part}%{password}" if password else user_part
+                    cmd = [
+                        "smbclient", share,
+                        "-U", auth,
+                        "-c", f"put {file_path} {filename}",
+                    ]
+                else:
+                    cmd = [
+                        "smbclient", share,
+                        "-N",
+                        "-c", f"put {file_path} {filename}",
+                    ]
+
+                proc = await asyncio.create_subprocess_exec(
+                    *cmd,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+                stdout, stderr = await asyncio.wait_for(
+                    proc.communicate(), timeout=120
+                )
+                if proc.returncode == 0:
+                    logger.info(f"[tts_cloud] SMB 上传成功: {share}/{filename}")
+                else:
+                    logger.warning(
+                        f"[tts_cloud] SMB 上传失败 (exit={proc.returncode}): "
+                        f"{stderr.decode()[:200]}"
+                    )
+            except FileNotFoundError:
+                # smbclient 不可用，降级为 shutil.copy
+                try:
+                    import shutil
+                    # 将 Windows 路径格式统一
+                    norm_share = share.replace("/", "\\")
+                    dest = os.path.join(norm_share, filename)
+                    shutil.copy2(file_path, dest)
+                    logger.info(f"[tts_cloud] SMB 复制成功: {dest}")
+                except Exception as e2:
+                    logger.warning(f"[tts_cloud] SMB 复制失败: {e2}")
+            except asyncio.TimeoutError:
+                logger.warning("[tts_cloud] SMB 上传超时")
+            except Exception as e:
+                logger.warning(f"[tts_cloud] SMB 上传异常: {e}")
+
+        asyncio.create_task(_upload())
 
     # ------------------------------------------------
     # Provider 发现
@@ -530,6 +898,23 @@ class Main(Star):
         # 9. 备用会话发送（best-effort）
         # ================================================
         await self._send_backup(text, final_audio, segments, audio_paths, event)
+
+        # ================================================
+        # 10. 本地归档 + 云存储（best-effort）
+        # ================================================
+        archivable = final_audio if final_audio else (audio_paths[0] if audio_paths else None)
+        if archivable:
+            archived = self._save_audio_file(archivable)
+            if archived:
+                self._cloud_backup(archived, text)
+        elif len(audio_paths) > 1:
+            for ap in audio_paths[1:]:
+                self._save_audio_file(ap)
+
+        retention = self.config.get('local_audio_retention_days', 7)
+        cleaned = self._cleanup_old_audio(retention)
+        if cleaned:
+            logger.info(f'[tts_storage] 后台清理: 删除 {cleaned} 个过期文件')
 
         return result_msg
 

@@ -127,6 +127,135 @@
     "hint": "发送语音时同步将文字+音频文件转发到指定的 QQ 群或好友。格式：群号 或 QQ号:friend。例: 123456（转发到群 123456）或 10001:friend（转发到好友 10001）。留空不转发"
   },
 
+  "local_audio_dir": {
+    "description": "本地音频存档目录",
+    "type": "string",
+    "default": "",
+    "hint": "TTS 生成的音频文件会复制一份到该目录持久保留。留空则使用默认路径 data/plugin_data/astrbot_plugin_voice_assistant/tts_archive"
+  },
+  "local_audio_retention_days": {
+    "description": "本地存档保留天数",
+    "type": "int",
+    "default": 7,
+    "hint": "超过 N 天的音频文件会被自动清理。设为 0 则永不清除"
+  },
+
+  "cloud_backup_enabled": {
+    "description": "启用云存储备份",
+    "type": "bool",
+    "default": false,
+    "hint": "开启后每次生成语音时，将音频文件上传到所选后端"
+  },
+  "cloud_backend": {
+    "description": "云存储后端类型",
+    "type": "string",
+    "default": "custom",
+    "options": ["custom", "s3", "webdav", "smb"],
+    "labels": ["自定义 API", "S3 兼容", "WebDAV", "SMB 共享"]
+  },
+  "cloud_custom_url": {
+    "description": "自定义·请求地址",
+    "type": "string",
+    "default": "",
+    "hint": "[custom] 上传接口 URL。文件将以 multipart/form-data 格式发送，文件字段名为 file"
+  },
+  "cloud_custom_headers": {
+    "description": "自定义·请求头",
+    "type": "text",
+    "default": "",
+    "hint": "[custom] 每行一条，格式: Key: Value。例:\nAuthorization: Bearer xxx\nX-Custom: value"
+  },
+  "cloud_custom_body": {
+    "description": "自定义·附加请求体",
+    "type": "text",
+    "default": "",
+    "hint": "[custom] JSON 对象，与文件一起以 multipart/form-data 发送。例: {\"album\": \"tts\"}"
+  },
+  "cloud_custom_result_path": {
+    "description": "自定义·返回 URL 路径",
+    "type": "string",
+    "default": "",
+    "hint": "[custom] 从上传返回 JSON 中提取最终 URL 的路径，支持点语法。例: data.url"
+  },
+  "cloud_s3_endpoint": {
+    "description": "S3·端点地址",
+    "type": "string",
+    "default": "",
+    "hint": "[s3] S3 兼容存储的端点 URL。例: https://s3.amazonaws.com 或 https://play.min.io"
+  },
+  "cloud_s3_region": {
+    "description": "S3·区域",
+    "type": "string",
+    "default": "",
+    "hint": "[s3] 存储区域。例: us-east-1, ap-northeast-1"
+  },
+  "cloud_s3_bucket": {
+    "description": "S3·Bucket",
+    "type": "string",
+    "default": "",
+    "hint": "[s3] 存储桶名称"
+  },
+  "cloud_s3_access_key": {
+    "description": "S3·Access Key",
+    "type": "string",
+    "default": "",
+    "hint": "[s3] 访问密钥 ID"
+  },
+  "cloud_s3_secret_key": {
+    "description": "S3·Secret Key",
+    "type": "string",
+    "default": "",
+    "hint": "[s3] 访问密钥 Secret"
+  },
+  "cloud_s3_path_style": {
+    "description": "S3·Path Style",
+    "type": "bool",
+    "default": true,
+    "hint": "[s3] true=路径风格 (/bucket/key)，false=虚拟主机风格 (bucket.endpoint/key)"
+  },
+  "cloud_webdav_url": {
+    "description": "WebDAV·端点地址",
+    "type": "string",
+    "default": "",
+    "hint": "[webdav] WebDAV 服务器目录 URL。例: https://nextcloud.example.com/remote.php/dav/files/user/"
+  },
+  "cloud_webdav_username": {
+    "description": "WebDAV·用户名",
+    "type": "string",
+    "default": "",
+    "hint": "[webdav] 基本认证用户名"
+  },
+  "cloud_webdav_password": {
+    "description": "WebDAV·密码",
+    "type": "string",
+    "default": "",
+    "hint": "[webdav] 基本认证密码"
+  },
+  "cloud_smb_share": {
+    "description": "SMB·共享路径",
+    "type": "string",
+    "default": "",
+    "hint": "[smb] 共享目录路径。例: \\\\server\\share\\backup 或 //server/share/backup"
+  },
+  "cloud_smb_username": {
+    "description": "SMB·用户名",
+    "type": "string",
+    "default": "",
+    "hint": "[smb] 访问共享的用户名"
+  },
+  "cloud_smb_password": {
+    "description": "SMB·密码",
+    "type": "string",
+    "default": "",
+    "hint": "[smb] 访问共享的密码"
+  },
+  "cloud_smb_domain": {
+    "description": "SMB·域",
+    "type": "string",
+    "default": "",
+    "hint": "[smb] 域（可选）。Windows 网络环境可能需要填写"
+  },
+
   "log_level": {
     "description": "日志级别",
     "type": "string",
