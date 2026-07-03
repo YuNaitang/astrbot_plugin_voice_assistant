@@ -539,18 +539,37 @@ class Main(Star):
 
     async def _send_backup(self, text: str, final_audio: str, segments: list,
                            audio_paths: list, event: AstrMessageEvent):
-        """将语音备份发送到指定会话（如日志群），失败不影响主流程。"""
+        """将语音备份发送到指定 QQ 群/好友，失败不影响主流程。"""
         backup = (self.config.get("backup_session_id") or "").strip()
         if not backup:
             return
 
-        logger.info(f"[ai_speak] 备份发送到: {backup}")
+        # 解析备份目标: "123456" = 群聊, "123456:friend" = 私聊
+        is_private = False
+        if ":friend" in backup:
+            backup = backup.replace(":friend", "").strip()
+            is_private = True
+        elif ":group" in backup:
+            backup = backup.replace(":group", "").strip()
+
+        if not backup or not backup.isdigit():
+            logger.warning(f"[ai_speak] 备份发送: 无效的 QQ 号 '{backup}'，跳过")
+            return
+
+        # 构造目标会话（复用当前事件的平台 ID）
+        session = MessageSesion(
+            event.session.platform_id,
+            MessageType.FRIEND_MESSAGE if is_private else MessageType.GROUP_MESSAGE,
+            backup,
+        )
+
+        logger.info(f"[ai_speak] 备份发送到 QQ: {session}")
         try:
             if final_audio and len(audio_paths) <= 1:
                 # 单段或已合并 → 一条发送
-                display_text = f"[语音备份] {text}" if len(text) <= 200 else f"[语音备份] {text[:200]}..."
+                display_text = text if len(text) <= 200 else text[:200] + "..."
                 await self.context.send_by_session(
-                    backup,
+                    session,
                     MessageChain([
                         Plain(display_text),
                         Record.fromFileSystem(final_audio),
@@ -560,15 +579,15 @@ class Main(Star):
                 # 多段 → 逐段发送
                 for i, (seg, ap) in enumerate(zip(segments, audio_paths)):
                     await self.context.send_by_session(
-                        backup,
+                        session,
                         MessageChain([
-                            Plain(f"[语音备份 {i+1}/{len(segments)}] {seg}"),
+                            Plain(f"[{i+1}/{len(segments)}] {seg}"),
                             Record.fromFileSystem(ap),
                         ])
                     )
-            logger.info(f"[ai_speak] 备份发送完成: {backup}")
+            logger.info(f"[ai_speak] 备份发送完成: {session}")
         except Exception as e:
-            logger.warning(f"[ai_speak] 备份发送失败 ({backup}): {e}")
+            logger.warning(f"[ai_speak] 备份发送失败 ({session}): {e}")
 
     # ------------------------------------------------
     # Provider 选取：首选 → 兜底 → 系统默认
