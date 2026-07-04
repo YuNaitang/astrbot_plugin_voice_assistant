@@ -45,6 +45,22 @@ CONFIG_SAVE_ALLOWLIST = {
     "log_level", "send_text_with_voice", "backup_session_id",
 }
 
+PLUGIN_CONFIG_PATH = os.path.normpath(os.path.join(
+    os.path.dirname(os.path.abspath(__file__)),
+    "..", "..", "..", "data", "config",
+    "astrbot_plugin_voice_assistant.json",
+))
+
+NUMERIC_FIELDS = {
+    "min_text_length", "max_text_length", "tts_segment_max_chars",
+    "tts_inter_segment_delay", "tts_retry_max_attempts",
+    "tts_merge_timeout_seconds", "rate_limit_seconds",
+    "density_window_minutes", "density_max_count",
+    "user_density_window_minutes", "user_density_threshold",
+    "user_density_curve_steepness", "default_permission_level",
+    "local_audio_retention_days",
+}
+
 
 class Main(Star):
     """AI Voice Assistant — 让 AI 主动调用 TTS 回复语音"""
@@ -93,6 +109,18 @@ class Main(Star):
             except Exception:
                 logger.info(f"  · (无法获取元数据的 Provider: {type(p).__name__})")
         self._providers_logged = True
+
+    # ── MIME 检测 ─────────────────────────────────────────────────
+
+    @staticmethod
+    def _detect_audio_mime(file_path: str) -> str:
+        """根据文件扩展名推断音频 MIME 类型。"""
+        ext = os.path.splitext(file_path)[1].lower()
+        return {
+            ".wav": "audio/wav", ".mp3": "audio/mpeg",
+            ".ogg": "audio/ogg", ".aac": "audio/aac",
+            ".flac": "audio/flac", ".wma": "audio/x-ms-wma",
+        }.get(ext, "audio/wav")
 
     # ── WebUI 注册 ──────────────────────────────────────────────
 
@@ -316,6 +344,13 @@ class Main(Star):
                 return jsonify({"success": False, "error": "格式错误"})
             # 白名单过滤
             safe = {k: v for k, v in updates.items() if k in CONFIG_SAVE_ALLOWLIST}
+            # 类型验证：数字字段进行类型强制转换
+            for k in NUMERIC_FIELDS:
+                if k in safe:
+                    try:
+                        safe[k] = float(safe[k]) if k in ("user_density_curve_steepness", "tts_inter_segment_delay") else int(safe[k])
+                    except (ValueError, TypeError):
+                        safe.pop(k, None)
             self.config.update(safe)
             # 尝试持久化
             self._persist_config()
@@ -327,35 +362,30 @@ class Main(Star):
         """持久化配置到 JSON 文件。"""
         import json as _json, os
         try:
-            config_path = os.path.join(
-                os.path.dirname(os.path.abspath(__file__)),
-                "..", "..", "..", "data", "config",
-                "astrbot_plugin_voice_assistant.json",
-            )
-            config_path = os.path.normpath(config_path)
+            config_path = PLUGIN_CONFIG_PATH
             config_dir = os.path.dirname(config_path)
             os.makedirs(config_dir, exist_ok=True)
             with open(config_path, "w", encoding="utf-8") as f:
                 _json.dump(self.config, f, ensure_ascii=False, indent=2)
         except Exception as e:
-            logger.debug(f"[WebUI] 配置持久化失败（非致命）: {e}")
+            logger.warning(f"[WebUI] 配置持久化失败（非致命）: {e}")
 
     async def handle_get_status(self):
         """运行时状态摘要。"""
         from quart import jsonify
-        from datetime import datetime, timezone
+        from datetime import datetime
         # 今日调用次数
-        today = datetime.now(timezone.utc).date()
+        today = datetime.now().date()
         today_count = sum(
-            1 for r in getattr(self.tts, "_recent_calls", [])
+            1 for r in self.tts._recent_calls
             if r.get("time", "").startswith(str(today))
         )
         # 活跃会话数
-        active_sessions = len(getattr(self.tts.density, "_voice_timeline", {}))
+        active_sessions = len(self.tts.density._voice_timeline)
         # 密度状态
         is_limited = any(
             self.tts.density.is_over_density_limit(sid)
-            for sid in getattr(self.tts.density, "_voice_timeline", {})
+            for sid in self.tts.density._voice_timeline
         )
         # 权限统计
         perm_entries = self.config.get("session_permissions", []) or []
@@ -369,7 +399,7 @@ class Main(Star):
                 "active_sessions": active_sessions,
                 "default_permission_level": self.config.get("default_permission_level", 1),
                 "custom_permissions_count": len(perm_entries),
-                "recent_calls": list(reversed(getattr(self.tts, "_recent_calls", [])[-10:])),
+                "recent_calls": list(reversed(self.tts._recent_calls[-10:])),
             },
         })
 
@@ -501,7 +531,7 @@ class Main(Star):
         return jsonify({
             "success": True,
             "data": data,
-            "mime": "audio/wav",
+            "mime": self._detect_audio_mime(fpath),
             "name": name,
         })
 
@@ -555,7 +585,7 @@ class Main(Star):
             return jsonify({
                 "success": True,
                 "data": audio_b64,
-                "mime": "audio/wav",
+                "mime": self._detect_audio_mime(audio_path),
                 "elapsed_seconds": round(elapsed, 2),
                 "size_bytes": size,
             })

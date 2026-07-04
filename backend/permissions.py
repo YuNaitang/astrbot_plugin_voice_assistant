@@ -112,9 +112,9 @@ class PermissionManager:
                 "astrbot_plugin_voice_assistant.json",
             )
             config_path = os.path.normpath(config_path)
-            if os.path.exists(os.path.dirname(config_path)):
-                with open(config_path, "w", encoding="utf-8") as f:
-                    _json.dump(self.config, f, ensure_ascii=False, indent=2)
-                logger.debug(f"[voice_perm] 配置已持久化: {config_path}")
+            os.makedirs(os.path.dirname(config_path), exist_ok=True)
+            with open(config_path, "w", encoding="utf-8") as f:
+                _json.dump(self.config, f, ensure_ascii=False, indent=2)
+            logger.debug(f"[voice_perm] 配置已持久化: {config_path}")
         except Exception as e:
-            logger.debug(f"[voice_perm] 配置持久化失败（非致命）: {e}")
+            logger.warning(f"[voice_perm] 配置持久化失败（非致命）: {e}")

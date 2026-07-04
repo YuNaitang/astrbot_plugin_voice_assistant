@@ -25,7 +25,7 @@
   --mauve: #cba6f7;
   --teal: #94e2d5;
   --radius: 16px;
-  --sidebar-width: 220px;
+  --sidebar-width: 240px;
 }
 * { margin: 0; padding: 0; box-sizing: border-box; }
 body {
@@ -95,7 +95,8 @@ body {
 
 /* -- 卡片 -- */
 .card {
-  background: var(--surface0);
+  background: rgba(49, 50, 68, 0.85);
+  backdrop-filter: blur(20px);
   border: 1px solid var(--surface1);
   border-radius: var(--radius);
   padding: 24px;
@@ -608,7 +609,7 @@ audio { width: 100%; margin-top: 8px; }
       <div class="field">
         <label>目标 Provider（可选）</label>
         <input id="testProvider" placeholder="留空使用系统默认" />
-        <div class="field-hint">留空则使用当前配置的首选 Provider</div>
+        <div class="field-hint">留空则使用当前配置的首选 Provider。常见 ID: edge-tts, baidu-tts, openai-tts,火山引擎等。可在 AstrBot 的 TTS Provider 设置中查看完整列表</div>
       </div>
       <button class="btn" id="testTtsBtn">合成并试听</button>
       <span id="testLoading" class="loading-text"></span>
@@ -971,6 +972,7 @@ function loadArchive() {
         var date = f.mtime ? f.mtime.slice(0, 19).replace("T", " ") : "-";
         return '<tr><td>' + escapeHtml(f.name) + '</td><td>' + size + '</td><td>' + date +
           '</td><td><button class="btn btn-sm play-btn" data-name="' + escapeHtml(f.name) + '">播放</button> ' +
+          '<button class="btn btn-sm download-btn" data-name="' + escapeHtml(f.name) + '">下载</button> ' +
           '<button class="btn btn-sm btn-danger del-btn" data-name="' + escapeHtml(f.name) + '">删除</button></td></tr>';
       }).join("") + "</tbody></table>";
 
@@ -1005,6 +1007,19 @@ function loadArchive() {
           } else {
             showStatus($("archiveStatus"), r.error || "删除失败", "error");
           }
+        });
+      });
+    });
+
+    $("archiveList").querySelectorAll(".download-btn").forEach(function(btn) {
+      btn.addEventListener("click", function() {
+        var name = this.dataset.name;
+        bridge.apiGet(PLUGIN_PREFIX + "/get_archive_file", { name: name }).then(function(r) {
+          if (!r.success) return;
+          var a = document.createElement("a");
+          a.href = "data:" + r.mime + ";base64," + r.data;
+          a.download = name;
+          a.click();
         });
       });
     });
