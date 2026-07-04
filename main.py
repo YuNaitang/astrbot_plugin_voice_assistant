@@ -619,22 +619,25 @@ class Main(Star):
             audio_path = await provider.get_audio(text)
             elapsed = time.time() - start
 
-            # 归档到本地存储（即使用户删除了临时文件也能追溯）
+            # 先读文件（读出 base64 后才能归档，archive.save_file 会 move 原文件）
+            with open(audio_path, "rb") as f:
+                audio_b64 = base64.b64encode(f.read()).decode("utf-8")
+            size = os.path.getsize(audio_path)
+            mime = self._detect_audio_mime(audio_path)
+
+            # 再归档（此时文件还在原路径）
             archived_path = None
             try:
                 archived_path = self.tts.archive.save_file(audio_path, text)
                 if archived_path:
-                    # 同步触发云备份
                     await self.tts._cloud_backup(archived_path, text)
             except Exception as arc_e:
                 logger.warning(f"[test_tts] 归档失败（非致命）: {arc_e}")
 
-            with open(audio_path, "rb") as f:
-                audio_b64 = base64.b64encode(f.read()).decode("utf-8")
-            size = os.path.getsize(audio_path)
-            # 清理临时文件
+            # 清理临时文件（如果 archive.save_file 已 move 则原文件已不存在）
             try:
-                os.remove(audio_path)
+                if os.path.exists(audio_path):
+                    os.remove(audio_path)
             except OSError:
                 pass
             logger.info(
@@ -645,7 +648,7 @@ class Main(Star):
             return jsonify({
                 "success": True,
                 "data": audio_b64,
-                "mime": self._detect_audio_mime(audio_path),
+                "mime": mime,
                 "elapsed_seconds": round(elapsed, 2),
                 "size_bytes": size,
             })
