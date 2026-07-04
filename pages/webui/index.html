@@ -692,6 +692,7 @@ if (!window.AstrBotPluginPage) {
 }
 
 var bridge = window.AstrBotPluginPage;
+var API_BASE = window.location.origin + "/api/v1/plugins/extensions/astrbot_plugin_voice_assistant";
 
 function $(id) { return document.getElementById(id); }
 function escapeHtml(s) {
@@ -1023,20 +1024,17 @@ function loadArchive() {
     $("archiveList").querySelectorAll(".play-btn").forEach(function(btn) {
       btn.addEventListener("click", function() {
         var name = this.dataset.name;
-        bridge.apiGet("get_archive_file", { name: name }).then(function(r) {
-          if (!r.success) { showStatus($("archiveStatus"), r.error || "获取失败", "error"); return; }
-          var wav = "data:" + r.mime + ";base64," + r.data;
-          var existing = $("archivePlayer");
-          if (!existing) {
-            var div = document.createElement("div");
-            div.id = "archivePlayer";
-            div.innerHTML = '<audio controls style="width:100%;margin-top:12px;"></audio>';
-            $("archiveList").after(div);
-            existing = $("archivePlayer");
-          }
-          existing.querySelector("audio").src = wav;
-          existing.querySelector("audio").play();
-        });
+        var url = API_BASE + "/serve_archive?name=" + encodeURIComponent(name);
+        var existing = $("archivePlayer");
+        if (!existing) {
+          var div = document.createElement("div");
+          div.id = "archivePlayer";
+          div.innerHTML = '<audio controls style="width:100%;margin-top:12px;"></audio>';
+          $("archiveList").after(div);
+          existing = $("archivePlayer");
+        }
+        existing.querySelector("audio").src = url;
+        existing.querySelector("audio").play();
       });
     });
 
@@ -1058,13 +1056,11 @@ function loadArchive() {
     $("archiveList").querySelectorAll(".download-btn").forEach(function(btn) {
       btn.addEventListener("click", function() {
         var name = this.dataset.name;
-        bridge.apiGet("get_archive_file", { name: name }).then(function(r) {
-          if (!r.success) return;
-          var a = document.createElement("a");
-          a.href = "data:" + r.mime + ";base64," + r.data;
-          a.download = name;
-          a.click();
-        });
+        var url = API_BASE + "/serve_archive?name=" + encodeURIComponent(name);
+        var a = document.createElement("a");
+        a.href = url;
+        a.download = name;
+        a.click();
       });
     });
   });
@@ -1087,15 +1083,6 @@ function loadTestProviders() {
 }
 
 var testHistory = [];
-
-function base64ToBlob(base64, mime) {
-  var byteChars = atob(base64);
-  var bytes = new Uint8Array(byteChars.length);
-  for (var i = 0; i < byteChars.length; i++) {
-    bytes[i] = byteChars.charCodeAt(i);
-  }
-  return new Blob([bytes], { type: mime });
-}
 
 function renderTestHistory() {
   var card = $("testHistoryCard");
@@ -1138,8 +1125,8 @@ $("testTtsBtn").addEventListener("click", function() {
       loading.textContent = "";
       return;
     }
-    var wav = URL.createObjectURL(base64ToBlob(res.data, res.mime));
-    $("testAudio").src = wav;
+    var audioUrl = API_BASE + "/serve_archive?name=" + encodeURIComponent(res.filename);
+    $("testAudio").src = audioUrl;
     $("testResult").style.display = "block";
     $("testMeta").textContent = "耗时 " + res.elapsed_seconds + " 秒 | " +
       (res.size_bytes < 1024 * 1024
@@ -1150,7 +1137,7 @@ $("testTtsBtn").addEventListener("click", function() {
     // 合成记录
     testHistory.unshift({
       text: text,
-      url: wav,
+      url: audioUrl,
       meta: $("testMeta").textContent,
       time: new Date().toLocaleTimeString(),
     });

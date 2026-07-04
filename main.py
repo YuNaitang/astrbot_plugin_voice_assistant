@@ -151,7 +151,7 @@ class Main(Star):
                 f"{prefix}/get_archive_list", self.handle_get_archive_list, ["GET"], "归档文件列表"
             )
             self.context.register_web_api(
-                f"{prefix}/get_archive_file", self.handle_get_archive_file, ["GET"], "获取归档文件"
+                f"{prefix}/serve_archive", self.handle_serve_archive, ["GET"], "获取归档音频文件"
             )
             self.context.register_web_api(
                 f"{prefix}/delete_archive", self.handle_delete_archive, ["POST"], "删除归档文件"
@@ -518,10 +518,11 @@ class Main(Star):
             "retention_days": self.config.get("local_audio_retention_days", 7),
         })
 
-    async def handle_get_archive_file(self):
-        """返回归档文件的 base64 数据和 MIME 类型。"""
-        from quart import jsonify, request
-        import base64, os
+    async def handle_serve_archive(self):
+        """直接返回归档音频文件（原始二进制流），供 <audio> 直接播放。"""
+        from quart import request, send_file
+        from astrbot.api import logger
+        import os
         name = request.args.get("name", "")
         if not name or ".." in name or "/" in name:
             return jsonify({"success": False, "error": "无效文件名"})
@@ -533,14 +534,8 @@ class Main(Star):
             return jsonify({"success": False, "error": "路径越界"})
         if not os.path.isfile(fpath):
             return jsonify({"success": False, "error": "文件不存在"})
-        with open(fpath, "rb") as f:
-            data = base64.b64encode(f.read()).decode("utf-8")
-        return jsonify({
-            "success": True,
-            "data": data,
-            "mime": self._detect_audio_mime(fpath),
-            "name": name,
-        })
+        logger.info(f"[serve_archive] 发送: {fpath}")
+        return await send_file(fpath)
 
     async def handle_delete_archive(self):
         """删除归档文件。"""
@@ -566,7 +561,7 @@ class Main(Star):
     async def handle_test_tts(self):
         """TTS 测试合成，返回音频 base64。"""
         from quart import jsonify, request
-        import base64, os, time
+        import os, time
         try:
             data = await request.get_json()
             text = (data.get("text") or "").strip()
@@ -619,27 +614,25 @@ class Main(Star):
             audio_path = await provider.get_audio(text)
             elapsed = time.time() - start
 
-            # 先读文件（读出 base64 后才能归档，archive.save_file 会 move 原文件）
-            with open(audio_path, "rb") as f:
-                audio_b64 = base64.b64encode(f.read()).decode("utf-8")
+            # 先取文件大小
             size = os.path.getsize(audio_path)
-            mime = self._detect_audio_mime(audio_path)
 
-            # 再归档（此时文件还在原路径）
+            # 归档到本地存储（save_file 内部会用 shutil.move 把文件移走）
             archived_path = None
             try:
                 archived_path = self.tts.archive.save_file(audio_path, text)
                 if archived_path:
                     await self.tts._cloud_backup(archived_path, text)
+                    size = os.path.getsize(archived_path)
             except Exception as arc_e:
                 logger.warning(f"[test_tts] 归档失败（非致命）: {arc_e}")
+                # 归档失败时，文件还在原位置，手动清理
+                try:
+                    if os.path.exists(audio_path):
+                        os.remove(audio_path)
+                except OSError:
+                    pass
 
-            # 清理临时文件（如果 archive.save_file 已 move 则原文件已不存在）
-            try:
-                if os.path.exists(audio_path):
-                    os.remove(audio_path)
-            except OSError:
-                pass
             logger.info(
                 f"[test_tts] 合成成功: text_len={len(text)} "
                 f"elapsed={elapsed:.1f}s size={size}B"
@@ -647,8 +640,7 @@ class Main(Star):
             )
             return jsonify({
                 "success": True,
-                "data": audio_b64,
-                "mime": mime,
+                "filename": os.path.basename(archived_path) if archived_path else "",
                 "elapsed_seconds": round(elapsed, 2),
                 "size_bytes": size,
             })
