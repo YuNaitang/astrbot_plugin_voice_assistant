@@ -8,6 +8,7 @@ import json as _json
 import os
 import random
 import shutil
+import subprocess
 from datetime import datetime, timedelta
 from typing import Optional
 
@@ -23,6 +24,26 @@ class AudioStorage:
         self._storage_dir: Optional[str] = None
         self._enabled = False
         self._init()
+
+    @staticmethod
+    def _find_curl() -> Optional[str]:
+        """查找 curl 可执行文件路径，优先 shutil.which，兜底走系统 shell。"""
+        path = shutil.which("curl")
+        if path:
+            return path
+        try:
+            result = subprocess.run(
+                "command -v curl",
+                shell=True,
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            if result.returncode == 0 and result.stdout.strip():
+                return result.stdout.strip()
+        except Exception:
+            pass
+        return None
 
     @staticmethod
     def _cloud_prefix() -> str:
@@ -132,7 +153,7 @@ class AudioStorage:
 
     def _put_custom(self, file_path: str, text: str) -> None:
         """自定义 API: multipart/form-data 上传 + JSON 路径提取 URL。"""
-        curl_path = shutil.which("curl")
+        curl_path = self._find_curl()
         if not curl_path:
             logger.warning("[tts_cloud] 未找到 curl，跳过上传")
             return
@@ -241,7 +262,7 @@ class AudioStorage:
             e = endpoint.rstrip("/").lstrip("https://").lstrip("http://")
             upload_url = f"https://{bucket}.{e}/{prefix}/{key}"
 
-        curl_path = shutil.which("curl")
+        curl_path = self._find_curl()
         if not curl_path:
             logger.warning("[tts_cloud] 未找到 curl，跳过 S3 上传")
             return
@@ -290,7 +311,7 @@ class AudioStorage:
         uid = f"{random.randint(100000, 999999):06d}"
         filename = f"voice_{ts}_{uid}.wav"
 
-        curl_path = shutil.which("curl")
+        curl_path = self._find_curl()
         if not curl_path:
             logger.warning("[tts_cloud] 未找到 curl，跳过 WebDAV 上传")
             return

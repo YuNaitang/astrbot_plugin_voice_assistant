@@ -1,5 +1,8 @@
 # Changelog
 
+## 1.5.3
+- 修复: curl 查找兜底 — `shutil.which` 失败时走 `command -v curl` 系统 shell 路径
+
 ## 1.5.2
 - 修复: 备份发送失败 — `send_by_session` → `send_message`（Context 无此方法）
 - 修复: 云存储上传异常 — curl PATH 解析兼容性（`execvp` ENOTDIR 跨平台修复）
