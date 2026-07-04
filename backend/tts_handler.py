@@ -416,41 +416,32 @@ class TtsHandler:
 
         logger.info(f"[ai_speak] 备份发送到 QQ: {session}")
         try:
-            if final_audio and len(audio_paths) <= 1:
-                display_text = text if len(text) <= 200 else text[:200] + "..."
-                size_str = self._format_file_size(final_audio)
-                info = (
-                    f"📁 语音备份\n"
-                    f"内容: {display_text}\n"
-                    f"文件: {os.path.basename(final_audio)}\n"
-                    f"大小: {size_str}"
-                )
-                await self.context.send_message(
-                    session,
-                    MessageChain([
-                        Plain(info),
-                        Record.fromFileSystem(final_audio),
-                        File(name=os.path.basename(final_audio), file=final_audio),
-                    ]),
-                )
-            elif audio_paths:
-                for i, (seg, ap) in enumerate(zip(segments, audio_paths)):
-                    display = seg if len(seg) <= 200 else seg[:200] + "..."
-                    size_str = self._format_file_size(ap)
-                    info = (
-                        f"📁 语音备份 段{i+1}/{len(segments)}\n"
-                        f"内容: {display}\n"
-                        f"文件: {os.path.basename(ap)}\n"
-                        f"大小: {size_str}"
-                    )
-                    await self.context.send_message(
-                        session,
-                        MessageChain([
-                            Plain(info),
-                            Record.fromFileSystem(ap),
-                            File(name=os.path.basename(ap), file=ap),
-                        ]),
-                    )
+            # 优先用 final_audio（单段或合并后），不存在时取第一段
+            audio_to_backup = final_audio or (audio_paths[0] if audio_paths else None)
+            if not audio_to_backup:
+                return
+
+            if not os.path.exists(audio_to_backup):
+                logger.warning(f"[ai_speak] 备份发送: 音频文件不存在 {audio_to_backup}，跳过")
+                return
+
+            display_text = text if len(text) <= 200 else text[:200] + "..."
+            size_str = self._format_file_size(audio_to_backup)
+            info = (
+                f"📁 语音备份"
+                f"{f' 段{i+1}/{len(segments)}' if not final_audio and audio_paths else ''}\n"
+                f"内容: {display_text}\n"
+                f"文件: {os.path.basename(audio_to_backup)}\n"
+                f"大小: {size_str}"
+            )
+            await self.context.send_message(
+                session,
+                MessageChain([
+                    Plain(info),
+                    Record.fromFileSystem(audio_to_backup),
+                    File(name=os.path.basename(audio_to_backup), file=audio_to_backup),
+                ]),
+            )
             logger.info(f"[ai_speak] 备份发送完成: {session}")
         except Exception as e:
             logger.warning(f"[ai_speak] 备份发送失败 ({session}): {e}")
