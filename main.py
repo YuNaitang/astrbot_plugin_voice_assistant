@@ -334,10 +334,9 @@ class Main(Star):
             )
             config_path = os.path.normpath(config_path)
             config_dir = os.path.dirname(config_path)
-            if os.path.exists(config_dir) or os.path.isdir(config_dir):
-                os.makedirs(config_dir, exist_ok=True)
-                with open(config_path, "w", encoding="utf-8") as f:
-                    _json.dump(self.config, f, ensure_ascii=False, indent=2)
+            os.makedirs(config_dir, exist_ok=True)
+            with open(config_path, "w", encoding="utf-8") as f:
+                _json.dump(self.config, f, ensure_ascii=False, indent=2)
         except Exception as e:
             logger.debug(f"[WebUI] 配置持久化失败（非致命）: {e}")
 
@@ -530,7 +529,7 @@ class Main(Star):
     async def handle_test_tts(self):
         """TTS 测试合成，返回音频 base64。"""
         from quart import jsonify, request
-        import base64, asyncio, os, time
+        import base64, os, time
         try:
             data = await request.get_json()
             text = (data.get("text") or "").strip()
