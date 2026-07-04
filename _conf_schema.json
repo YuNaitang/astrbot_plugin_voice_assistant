@@ -291,6 +291,6 @@
     "description": "启用独立 WebUI 面板",
     "type": "bool",
     "default": true,
-    "hint": "关闭后 /panel 端点将返回 404"
+    "hint": "关闭后独立面板(/panel)将不可访问"
   }
 }

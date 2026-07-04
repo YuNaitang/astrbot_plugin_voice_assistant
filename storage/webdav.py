@@ -1,5 +1,5 @@
 """
-AI Voice Assistant — WebDAV 云存储 Provider
+聆音 — WebDAV 云存储 Provider
 ============================================
 使用 aiohttp PUT 上传到 WebDAV 兼容存储。
 """

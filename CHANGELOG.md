@@ -1,5 +1,17 @@
 # Changelog
 
+## 2.1.0-beta
+- 品牌命名: 中文名正式定为「聆音」
+- 新增: 独立 WebUI 面板（`/panel` 端点，不受 AstrBot iframe 沙箱限制）
+- 新增: 配置管理、权限管理、密度统计、归档浏览、TTS 测试等 6 个管理页面
+- 新增: 归档音频侧车元数据文件（同名 .txt）
+- 新增: `webui_enabled` 配置项
+- 增强: `handle_get_tts_providers` — Provider 选择下拉列表
+- 增强: `handle_get_recent_sessions` — 会话 ID 自动补全
+- 架构: 原生 AstrBot WebUI 集成（`register_web_api` + bridge SDK）
+- 修复: iframe sandbox 兼容 — 移除 `confirm()`，Web Audio API 直播放音
+- 修复: TTS 测试音频通过 base64 桥接传输，绕过 HTTP 直连认证限制
+
 ## 2.0.0
 - 重构: 模块化拆包 — 单文件 main.py (603行) + storage.py (410行) 拆分为 backend/ + storage/ 子包
 - 重构: 新增 errors.py — 8 个自定义异常类层次，用精确捕获替换裸 `except Exception`

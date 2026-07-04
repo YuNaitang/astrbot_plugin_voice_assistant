@@ -1,5 +1,5 @@
 """
-AI Voice Assistant — AstrBot 通用 TTS 编排插件
+聆音 — AstrBot 通用 TTS 编排插件
 
 允许AI 通过工具自主调用 TTS 回复语音。
 支持多 Provider 降级、三级权限管理、双层密度控制、长文本分段合并。
@@ -65,7 +65,7 @@ NUMERIC_FIELDS = {
 
 
 class Main(Star):
-    """AI Voice Assistant — 让 AI 主动调用 TTS 回复语音"""
+    """聆音 — 让 AI 主动调用 TTS 回复语音"""
 
     def __init__(self, context, config: dict = None):
         super().__init__(context)
@@ -78,7 +78,7 @@ class Main(Star):
 
         self._log_available_tts_providers()
         logger.info(
-            f"AI Voice Assistant 已加载 "
+            f"聆音 已加载 "
             f"(enabled={self.config.get('voice_enabled', True)}, "
             f"log_level={self.config.get('log_level', 'info')})"
         )
@@ -88,7 +88,7 @@ class Main(Star):
     async def terminate(self):
         """插件卸载时清理临时音频文件。"""
         self.tts.cleanup_temp_files()
-        logger.info("AI Voice Assistant 已卸载")
+        logger.info("聆音 已卸载")
 
     # ── Provider 发现 ──────────────────────────────────────────
 
@@ -103,7 +103,7 @@ class Main(Star):
             return
         if not providers:
             return
-        logger.info(f"AI Voice Assistant: 发现 {len(providers)} 个 TTS Provider:")
+        logger.info(f"聆音: 发现 {len(providers)} 个 TTS Provider:")
         for p in providers:
             try:
                 meta = p.meta()
@@ -172,7 +172,7 @@ class Main(Star):
             self.context.register_web_api(
                 f"{prefix}/panel", self.handle_serve_panel, ["GET"], "管理面板（独立页面，无沙箱）"
             )
-            logger.info(f"AI Voice Assistant WebUI API 已注册（{prefix}）")
+            logger.info(f"聆音 WebUI API 已注册（{prefix}）")
         except Exception as e:
             logger.warning(f"WebUI API 注册失败（非致命）: {e}")
 

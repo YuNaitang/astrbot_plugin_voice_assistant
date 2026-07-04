@@ -1,5 +1,5 @@
 """
-AI Voice Assistant — 本地音频归档
+聆音 — 本地音频归档
 ===================================
 包含初始化音频存储目录、文件持久化（move）、过期清理。
 每个归档 WAV 附带同名的 .txt 元数据文件。
@@ -44,11 +44,11 @@ class LocalArchive:
             retention = self.config.get("local_audio_retention_days", 7)
             cleaned = self.cleanup_old(retention)
             logger.info(
-                f"AI Voice Assistant: 音频存储目录 {raw} "
+                f"聆音: 音频存储目录 {raw} "
                 f"(保留 {retention} 天，本次清理 {cleaned} 个)"
             )
         except OSError as e:
-            logger.warning(f"AI Voice Assistant: 无法创建音频存储目录 {raw}: {e}")
+            logger.warning(f"聆音: 无法创建音频存储目录 {raw}: {e}")
             self._enabled = False
 
     # ── 归档 ──────────────────────────────────────────────────

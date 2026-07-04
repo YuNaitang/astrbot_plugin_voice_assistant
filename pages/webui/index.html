@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>AI Voice Assistant</title>
+<title>聆音</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
 <style>
 /* Catppuccin Mocha */
@@ -44,6 +44,8 @@ body {
   flex-shrink: 0;
   border-right: 1px solid var(--surface0);
   overflow-y: auto;
+  display: flex;
+  flex-direction: column;
 }
 .sidebar-title {
   padding: 0 20px 24px;
@@ -283,14 +285,17 @@ audio { width: 100%; margin-top: 8px; }
 <body>
 
 <nav class="sidebar">
-  <div class="sidebar-title">AI Voice Assistant</div>
-  <div class="sidebar-subtitle">控制面板</div>
+  <div class="sidebar-title">聆音</div>
   <button class="nav-btn active" data-page="dashboard">仪表盘</button>
   <button class="nav-btn" data-page="settings">配置</button>
   <button class="nav-btn" data-page="permissions">权限</button>
   <button class="nav-btn" data-page="statistics">统计</button>
   <button class="nav-btn" data-page="archive">归档</button>
   <button class="nav-btn" data-page="test">测试</button>
+  <div style="margin-top:auto;padding:20px;border-top:1px solid var(--surface0);font-size:0.75rem;color:var(--overlay0);line-height:1.4;">
+    因 AstrBot 沙箱限制，文件操作和音频播放无法在此页面正常工作。<br>
+    <a href="/api/v1/plugins/extensions/astrbot_plugin_voice_assistant/panel" target="_blank" style="color:var(--blue);">→ 打开独立面板</a>
+  </div>
 </nav>
 
 <main class="main" id="mainContent">

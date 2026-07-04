@@ -1,4 +1,4 @@
-# AI Voice Assistant — AstrBot Plugin
+# 聆音 — AI 语音助手
 
 允许 AI 通过 `ai_speak` 工具自主调用 TTS 回复语音。支持多 Provider 降级、三级权限管理、长文本分段合并、双层密度控制。
 
