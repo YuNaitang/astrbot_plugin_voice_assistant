@@ -551,6 +551,8 @@ class Main(Star):
         """返回独立管理面板 HTML（不在 iframe 内，无沙箱限制）。"""
         from quart import send_file
         import os
+        if not self.config.get("webui_enabled", True):
+            return jsonify({"success": False, "error": "WebUI 面板已禁用"})
         panel_path = os.path.join(
             os.path.dirname(os.path.abspath(__file__)),
             "pages", "webui", "standalone.html",
