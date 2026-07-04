@@ -503,7 +503,10 @@ class Main(Star):
         if not storage_dir or not os.path.isdir(storage_dir):
             return jsonify({"success": True, "files": [], "path": "", "total": 0, "retention_days": 0})
         files = []
+        AUDIO_EXTS = {".wav", ".mp3", ".ogg", ".aac", ".flac", ".wma"}
         for fname in sorted(os.listdir(storage_dir), reverse=True):
+            if os.path.splitext(fname)[1].lower() not in AUDIO_EXTS:
+                continue
             fpath = os.path.join(storage_dir, fname)
             if not os.path.isfile(fpath):
                 continue
