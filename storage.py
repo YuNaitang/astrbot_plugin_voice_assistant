@@ -23,6 +23,11 @@ class AudioStorage:
         self._enabled = False
         self._init()
 
+    @staticmethod
+    def _cloud_prefix() -> str:
+        """云存储子目录/前缀，防止文件散落在根目录。"""
+        return "voice_assistant"
+
     # ----------------------------------------------------------------
     # 本地归档
     # ----------------------------------------------------------------
@@ -223,11 +228,12 @@ class AudioStorage:
         uid = f"{random.randint(100000, 999999):06d}"
         key = f"voice_{ts}_{uid}.wav"
 
+        prefix = self._cloud_prefix()
         if path_style:
-            upload_url = f"{endpoint.rstrip('/')}/{bucket}/{key}"
+            upload_url = f"{endpoint.rstrip('/')}/{bucket}/{prefix}/{key}"
         else:
             e = endpoint.rstrip("/").lstrip("https://").lstrip("http://")
-            upload_url = f"https://{bucket}.{e}/{key}"
+            upload_url = f"https://{bucket}.{e}/{prefix}/{key}"
 
         cmd = [
             "curl", "-f", "-s",
@@ -276,7 +282,7 @@ class AudioStorage:
         cmd = ["curl", "-f", "-s", "-T", file_path]
         if username and password:
             cmd.extend(["-u", f"{username}:{password}"])
-        cmd.append(f"{url.rstrip('/')}/{filename}")
+        cmd.append(f"{url.rstrip('/')}/{self._cloud_prefix()}/{filename}")
 
         async def _upload():
             try:
@@ -332,7 +338,7 @@ class AudioStorage:
                 import shutil
                 try:
                     norm_share = share.replace("/", "\\")
-                    dest = os.path.join(norm_share, filename)
+                    dest = os.path.join(norm_share, self._cloud_prefix(), filename)
                     parent = os.path.dirname(dest)
                     if parent:
                         os.makedirs(parent, exist_ok=True)
