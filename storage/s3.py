@@ -1,25 +1,33 @@
 """
 AI Voice Assistant — S3 兼容云存储 Provider
 ============================================
-使用 curl --aws-sigv4 签名上传到 S3 兼容存储。
+使用 boto3 (AWS SDK) 上传到任何 S3 兼容存储。
 """
-import json as _json
+import mimetypes
 import os
-import random
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
+
+import boto3
+from botocore.config import Config as BotoConfig
+from botocore.exceptions import ClientError, EndpointConnectionError
 
 from astrbot.api import logger
 
-from ..errors import CurlNotFoundError
+from ..errors import CloudUploadError
 from .base import CloudProvider
 
 
 class S3Provider(CloudProvider):
-    """S3 兼容存储 Provider。"""
+    """S3 兼容存储 Provider（使用 AWS SDK）。"""
+
+    MAX_RETRIES = 3
+    RETRY_DELAY = 2
 
     async def upload(self, file_path: str, text: str) -> Optional[str]:
-        curl_path = self._ensure_curl()
+        if not os.path.exists(file_path):
+            logger.warning(f"[tts_cloud] S3 上传: 文件不存在 {file_path}")
+            return None
 
         endpoint = (self.config.get("cloud_s3_endpoint") or "").strip()
         region = (self.config.get("cloud_s3_region") or "").strip()
@@ -29,53 +37,73 @@ class S3Provider(CloudProvider):
         path_style = self.config.get("cloud_s3_path_style", True)
 
         missing = []
-        if not endpoint:
-            missing.append("cloud_s3_endpoint")
-        if not region:
-            missing.append("cloud_s3_region")
-        if not bucket:
-            missing.append("cloud_s3_bucket")
-        if not access_key or not secret_key:
-            missing.append("cloud_s3_access_key/secret_key")
+        if not endpoint: missing.append("cloud_s3_endpoint")
+        if not region: missing.append("cloud_s3_region")
+        if not bucket: missing.append("cloud_s3_bucket")
+        if not access_key or not secret_key: missing.append("cloud_s3_access_key/secret_key")
         if missing:
             logger.warning(f"[tts_cloud] S3 配置不完整: {', '.join(missing)}，跳过")
             return None
 
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-        uid = f"{random.randint(100000, 999999):06d}"
+        uid = f"{os.urandom(3).hex():06s}"
         key = f"voice_{ts}_{uid}.wav"
 
-        if path_style:
-            upload_url = f"{endpoint.rstrip('/')}/{bucket}/{self._cloud_prefix()}/{key}"
-        else:
-            e = endpoint.rstrip("/").lstrip("https://").lstrip("http://")
-            upload_url = f"https://{bucket}.{e}/{self._cloud_prefix()}/{key}"
+        s3_key = f"{self._cloud_prefix()}/{key}"
+        mime_type, _ = mimetypes.guess_type(file_path)
+        if not mime_type:
+            mime_type = "audio/wav"
 
-        cmd = [
-            curl_path, "-f", "-s",
-            "--aws-sigv4", f"aws:amz:{region}:s3",
-            "--user", f"{access_key}:{secret_key}",
-            "-X", "PUT",
-            "--data-binary", f"@{file_path}",
-            upload_url,
-        ]
+        # 构造 S3 客户端
+        s3 = boto3.client(
+            "s3",
+            endpoint_url=endpoint.rstrip("/"),
+            region_name=region,
+            aws_access_key_id=access_key,
+            aws_secret_access_key=secret_key,
+            config=BotoConfig(
+                signature_version="s3v4",
+                s3={"addressing_style": "path" if path_style else "virtual"},
+            ),
+        )
 
-        try:
-            returncode, stdout, stderr = await self._run_curl(cmd)
-            if returncode == 0:
-                logger.info(f"[tts_cloud] S3 上传成功: {upload_url}")
-                return upload_url
-            else:
-                logger.warning(
-                    f"[tts_cloud] S3 上传失败 (exit={returncode}): {stderr[:200]}"
-                )
+        # 带重试的上传
+        for attempt in range(self.MAX_RETRIES):
+            try:
+                with open(file_path, "rb") as f:
+                    s3.put_object(
+                        Bucket=bucket,
+                        Key=s3_key,
+                        Body=f,
+                        ContentType=mime_type,
+                    )
+                logger.info(f"[tts_cloud] S3 上传成功: {s3_key}")
+                return s3_key
+
+            except ClientError as e:
+                code = e.response["Error"]["Code"]
+                msg = e.response["Error"]["Message"]
+                if attempt < self.MAX_RETRIES - 1:
+                    logger.warning(
+                        f"[tts_cloud] S3 上传失败 ({code})，{self.RETRY_DELAY}s 后重试: {msg}"
+                    )
+                    await __import__("asyncio").sleep(self.RETRY_DELAY)
+                    continue
+                logger.warning(f"[tts_cloud] S3 上传失败 ({code}): {msg}")
                 return None
-        except CurlNotFoundError:
-            logger.warning("[tts_cloud] 未找到 curl，请确认 curl 已安装并在 PATH 中")
-            return None
-        except __import__("asyncio").TimeoutError:
-            logger.warning("[tts_cloud] S3 上传超时")
-            return None
-        except Exception as e:
-            logger.warning(f"[tts_cloud] S3 上传异常: {e}")
-            return None
+
+            except EndpointConnectionError as e:
+                logger.warning(f"[tts_cloud] S3 无法连接端点: {e}")
+                return None
+
+            except Exception as e:
+                if attempt < self.MAX_RETRIES - 1:
+                    logger.warning(
+                        f"[tts_cloud] S3 上传异常，{self.RETRY_DELAY}s 后重试: {e}"
+                    )
+                    await __import__("asyncio").sleep(self.RETRY_DELAY)
+                    continue
+                logger.warning(f"[tts_cloud] S3 上传异常: {e}")
+                return None
+
+        return None
