@@ -266,5 +266,12 @@
       "DEBUG — 输出所有内部调试信息"
     ],
     "hint": "工具调用和密度判定始终输出 info 日志"
+  },
+
+  "send_text_with_voice": {
+    "description": "同时发送文字",
+    "type": "bool",
+    "default": false,
+    "hint": "开启后每条语音消息会附带文字内容一起发送。关闭则仅发送语音，更简洁"
   }
 }

@@ -7,6 +7,7 @@
 - 重构: 密度控制抽取 — `DensityController` 独立类替代 main.py 中散落的 6 个方法
 - 重构: `_find_curl()` 独立为 `storage/curl.py`，`LocalArchive` 独立为 `storage/local.py`
 - 兼容: `permissions.py` 保留向后兼容的 re-export shim
+- 增强: 备份发送 — 未配置时默认发往 bot 自身，消息包含文字信息 + 语音 + 原始 WAV 文件（File 组件）
 
 ## 1.5.3
 - 修复: curl 查找兜底 — `shutil.which` 失败时走 `command -v curl` 系统 shell 路径

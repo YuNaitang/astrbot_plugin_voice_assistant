@@ -16,7 +16,7 @@ from ..errors import ArchiveError
 
 
 class LocalArchive:
-    """本地音频归档管理。"""
+    """本地音频归档管理：目录初始化 → 文件移入 → 过期清理。"""
 
     def __init__(self, config: dict):
         self.config = config

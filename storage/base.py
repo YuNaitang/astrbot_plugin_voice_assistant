@@ -14,7 +14,7 @@ from .curl import find_curl
 
 
 class CloudProvider(ABC):
-    """云存储上传 Provider 基类。"""
+    """云存储上传 Provider 基类。继承者需实现 upload()，可复用 _run_curl() 模板方法。"""
 
     UPLOAD_TIMEOUT = 120
 

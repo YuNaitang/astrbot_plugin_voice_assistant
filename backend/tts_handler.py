@@ -41,7 +41,7 @@ from .permissions import (
 
 
 class TtsHandler:
-    """TTS 编排处理器。"""
+    """TTS 编排入口。持有权限、密度、归档、云存储等子模块，编排 ai_speak 的完整流程。"""
 
     def __init__(self, context, config: dict):
         self.context = context
@@ -330,6 +330,14 @@ class TtsHandler:
 
     # ── 发送消息 ──────────────────────────────────────────────
 
+    def _build_chain(self, text_part: str, audio_path: str) -> MessageChain:
+        """根据 send_text_with_voice 配置构造消息链。"""
+        send_text = self.config.get("send_text_with_voice", False)
+        record = Record.fromFileSystem(audio_path)
+        if send_text:
+            return MessageChain([Plain(text_part), record])
+        return MessageChain([record])
+
     async def _send_message(
         self,
         event: AstrMessageEvent,
@@ -345,12 +353,8 @@ class TtsHandler:
                 f"[ai_speak] 分段发送 {len(audio_paths)} 条语音 session={session_id}"
             )
             for i, (seg, ap) in enumerate(zip(segments, audio_paths)):
-                await event.send(
-                    MessageChain([
-                        Plain(f"[{i+1}/{len(segments)}] {seg}"),
-                        Record.fromFileSystem(ap),
-                    ])
-                )
+                label = f"[{i+1}/{len(segments)}] {seg}"
+                await event.send(self._build_chain(label, ap))
                 logger.info(
                     f"[ai_speak] 已发送 段{i+1}/{len(segments)} session={session_id}"
                 )
@@ -362,12 +366,7 @@ class TtsHandler:
                 f"audio={'merged' if len(audio_paths) > 1 else 'single'} "
                 f"session={session_id}"
             )
-            await event.send(
-                MessageChain([
-                    Plain(display_text),
-                    Record.fromFileSystem(final_audio),
-                ])
-            )
+            await event.send(self._build_chain(display_text, final_audio))
             logger.info(f"[ai_speak] 已发送 session={session_id}")
             if len(segments) > 1:
                 return f"语音消息已发送成功（{len(segments)} 段已合并）"

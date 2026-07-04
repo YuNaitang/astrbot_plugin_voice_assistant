@@ -85,11 +85,17 @@ class Main(Star):
 
     @filter.llm_tool(name="ai_speak")
     async def ai_speak(self, event: AstrMessageEvent, text: str):
-        """用语音回复用户。当你认为适合用语音表达、或用户期望听到语音时调用。
-        系统会自动合成语音并同时发送文字和语音文件。
+        """把文字转成语音回复用户。当你觉得这段话用语音说更自然时调用。
+        系统会自动发送文字+语音，无需在回复中再写一遍。
+
+        调用示例：
+          ai_speak(text="好的，我马上处理！")  → 用户收到文字 + 语音
+          ai_speak(text="爱你哟")              → 用户收到文字 + 语音
+
+        注意：不适合念长文（>300字）、不适合发纯文字通知、不需要逐句调用。
 
         Args:
-            text(string): 想说出的文本（中文，自然流畅的口语表达）
+            text(string): 想说出的文本，口语化、自然，不要加标点符号外的特殊标记
         """
         return await self.tts.speak(event, text)
 
