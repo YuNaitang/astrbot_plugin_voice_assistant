@@ -573,11 +573,34 @@ class Main(Star):
             if not text:
                 return jsonify({"success": False, "error": "请输入文本"})
             provider_id = data.get("provider_id", "") or self.config.get("tts_provider_id", "")
-            provider = self.tts._resolve_provider(provider_id) if provider_id else None
+            provider = None
+            if provider_id:
+                provider = self.tts._resolve_provider(provider_id)
+                if not provider:
+                    logger.warning(f"[test_tts] 指定 Provider '{provider_id}' 未找到，尝试自动选择")
             if not provider:
-                provider = self.context.get_using_tts_provider(None)
+                # 尝试获取系统默认 TTS Provider
+                try:
+                    provider = self.context.get_using_tts_provider(None)
+                except Exception:
+                    provider = None
             if not provider:
-                return jsonify({"success": False, "error": "未找到可用的 TTS Provider"})
+                # 最后兜底：从已注册的 Provider 列表中取第一个
+                try:
+                    all_providers = self.context.get_all_tts_providers()
+                    for p in all_providers:
+                        if hasattr(p, 'get_audio'):
+                            provider = p
+                            break
+                except Exception:
+                    pass
+            if not provider:
+                err_msg = (
+                    "未找到可用的 TTS Provider。请先在「配置」页面选择 TTS 引擎并保存，"
+                    "或确认 AstrBot 已注册至少一个 TTS Provider。"
+                )
+                logger.warning(f"[test_tts] {err_msg}")
+                return jsonify({"success": False, "error": err_msg})
             start = time.time()
             audio_path = await provider.get_audio(text)
             elapsed = time.time() - start
@@ -589,6 +612,10 @@ class Main(Star):
                 os.remove(audio_path)
             except OSError:
                 pass
+            logger.info(
+                f"[test_tts] 合成成功: text_len={len(text)} "
+                f"elapsed={elapsed:.1f}s size={size}B"
+            )
             return jsonify({
                 "success": True,
                 "data": audio_b64,
@@ -597,7 +624,8 @@ class Main(Star):
                 "size_bytes": size,
             })
         except Exception as e:
-            return jsonify({"success": False, "error": str(e)})
+            logger.error(f"[test_tts] 合成异常: {e}", exc_info=True)
+            return jsonify({"success": False, "error": f"合成异常: {e}"})
 
     async def handle_get_tts_providers(self):
         """返回可用的 TTS Provider 列表。"""
