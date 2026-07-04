@@ -154,6 +154,9 @@ class Main(Star):
                 f"{prefix}/serve_archive", self.handle_serve_archive, ["GET"], "获取归档音频文件"
             )
             self.context.register_web_api(
+                f"{prefix}/get_archive_file", self.handle_get_archive_file, ["GET"], "获取归档文件 base64"
+            )
+            self.context.register_web_api(
                 f"{prefix}/delete_archive", self.handle_delete_archive, ["POST"], "删除归档文件"
             )
             self.context.register_web_api(
@@ -537,6 +540,30 @@ class Main(Star):
         logger.info(f"[serve_archive] 发送: {fpath}")
         return await send_file(fpath)
 
+    async def handle_get_archive_file(self):
+        """返回归档文件的 base64 数据（供 bridge API 调用，用于 iframe 内播放）。"""
+        from quart import jsonify, request
+        import base64, os
+        name = request.args.get("name", "")
+        if not name or ".." in name or "/" in name:
+            return jsonify({"success": False, "error": "无效文件名"})
+        storage_dir = self.tts.archive._storage_dir
+        if not storage_dir:
+            return jsonify({"success": False, "error": "归档目录未初始化"})
+        fpath = os.path.normpath(os.path.join(storage_dir, name))
+        if not fpath.startswith(os.path.normpath(storage_dir)):
+            return jsonify({"success": False, "error": "路径越界"})
+        if not os.path.isfile(fpath):
+            return jsonify({"success": False, "error": "文件不存在"})
+        with open(fpath, "rb") as f:
+            data = base64.b64encode(f.read()).decode("utf-8")
+        return jsonify({
+            "success": True,
+            "data": data,
+            "mime": self._detect_audio_mime(fpath),
+            "name": name,
+        })
+
     async def handle_delete_archive(self):
         """删除归档文件。"""
         from quart import jsonify, request
@@ -561,7 +588,7 @@ class Main(Star):
     async def handle_test_tts(self):
         """TTS 测试合成，返回音频 base64。"""
         from quart import jsonify, request
-        import os, time
+        import base64, os, time
         try:
             data = await request.get_json()
             text = (data.get("text") or "").strip()
@@ -614,24 +641,27 @@ class Main(Star):
             audio_path = await provider.get_audio(text)
             elapsed = time.time() - start
 
-            # 先取文件大小
+            # 读文件为 base64（通过 bridge API 传回前端，iframe 不能直接 HTTP 请求）
+            with open(audio_path, "rb") as f:
+                audio_b64 = base64.b64encode(f.read()).decode("utf-8")
             size = os.path.getsize(audio_path)
+            mime = self._detect_audio_mime(audio_path)
 
-            # 归档到本地存储（save_file 内部会用 shutil.move 把文件移走）
+            # 归档（此时文件还在，save_file 内部会 move）
             archived_path = None
             try:
                 archived_path = self.tts.archive.save_file(audio_path, text)
                 if archived_path:
                     await self.tts._cloud_backup(archived_path, text)
-                    size = os.path.getsize(archived_path)
             except Exception as arc_e:
                 logger.warning(f"[test_tts] 归档失败（非致命）: {arc_e}")
-                # 归档失败时，文件还在原位置，手动清理
-                try:
-                    if os.path.exists(audio_path):
-                        os.remove(audio_path)
-                except OSError:
-                    pass
+
+            # 清理
+            try:
+                if os.path.exists(audio_path):
+                    os.remove(audio_path)
+            except OSError:
+                pass
 
             logger.info(
                 f"[test_tts] 合成成功: text_len={len(text)} "
@@ -640,6 +670,8 @@ class Main(Star):
             )
             return jsonify({
                 "success": True,
+                "data": audio_b64,
+                "mime": mime,
                 "filename": os.path.basename(archived_path) if archived_path else "",
                 "elapsed_seconds": round(elapsed, 2),
                 "size_bytes": size,

@@ -694,12 +694,19 @@ if (!window.AstrBotPluginPage) {
 var bridge = window.AstrBotPluginPage;
 var API_BASE = window.location.origin + "/api/v1/plugins/extensions/astrbot_plugin_voice_assistant";
 
-function fetchAudioUrl(audioUrl) {
-  return fetch(audioUrl, { credentials: "include" }).then(function(r) {
-    if (!r.ok) throw new Error("HTTP " + r.status);
-    return r.blob();
-  }).then(function(blob) {
-    return URL.createObjectURL(blob);
+function base64ToBlob(base64, mime) {
+  var byteChars = atob(base64);
+  var bytes = new Uint8Array(byteChars.length);
+  for (var i = 0; i < byteChars.length; i++) {
+    bytes[i] = byteChars.charCodeAt(i);
+  }
+  return new Blob([bytes], { type: mime });
+}
+
+function bridgeAudioToUrl(bridgePromise) {
+  return bridgePromise.then(function(res) {
+    if (!res || !res.success) throw new Error((res && res.error) || "获取音频失败");
+    return URL.createObjectURL(base64ToBlob(res.data, res.mime));
   });
 }
 
@@ -1033,8 +1040,7 @@ function loadArchive() {
     $("archiveList").querySelectorAll(".play-btn").forEach(function(btn) {
       btn.addEventListener("click", function() {
         var name = this.dataset.name;
-        var url = API_BASE + "/serve_archive?name=" + encodeURIComponent(name);
-        fetchAudioUrl(url).then(function(blobUrl) {
+        bridgeAudioToUrl(bridge.apiGet("get_archive_file", { name: name })).then(function(blobUrl) {
           var existing = $("archivePlayer");
           if (!existing) {
             var div = document.createElement("div");
@@ -1069,8 +1075,7 @@ function loadArchive() {
     $("archiveList").querySelectorAll(".download-btn").forEach(function(btn) {
       btn.addEventListener("click", function() {
         var name = this.dataset.name;
-        var url = API_BASE + "/serve_archive?name=" + encodeURIComponent(name);
-        fetchAudioUrl(url).then(function(blobUrl) {
+        bridgeAudioToUrl(bridge.apiGet("get_archive_file", { name: name })).then(function(blobUrl) {
           var a = document.createElement("a");
           a.href = blobUrl;
           a.download = name;
@@ -1142,8 +1147,7 @@ $("testTtsBtn").addEventListener("click", function() {
       loading.textContent = "";
       return;
     }
-    var audioUrl = API_BASE + "/serve_archive?name=" + encodeURIComponent(res.filename);
-    fetchAudioUrl(audioUrl).then(function(blobUrl) {
+    bridgeAudioToUrl(Promise.resolve(res)).then(function(blobUrl) {
       $("testAudio").src = blobUrl;
       $("testResult").style.display = "block";
       $("testMeta").textContent = "耗时 " + res.elapsed_seconds + " 秒 | " +
@@ -1152,7 +1156,6 @@ $("testTtsBtn").addEventListener("click", function() {
           : (res.size_bytes / 1024 / 1024).toFixed(1) + " MB");
       $("testAudio").play();
 
-      // 合成记录
       testHistory.unshift({
         text: text,
         url: blobUrl,
@@ -1165,7 +1168,7 @@ $("testTtsBtn").addEventListener("click", function() {
       btn.disabled = false;
       loading.textContent = "";
     }).catch(function(e) {
-      showStatus($("testStatus"), "音频加载失败: " + e.message, "error");
+      showStatus($("testStatus"), "音频处理失败: " + e.message, "error");
       btn.disabled = false;
       loading.textContent = "";
     });
