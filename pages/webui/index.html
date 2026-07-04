@@ -625,6 +625,10 @@ audio { width: 100%; margin-top: 8px; }
         <div id="testMeta" style="font-size:0.82rem; color:var(--overlay0); margin-top:8px;"></div>
       </div>
     </div>
+    <div class="card" id="testHistoryCard" style="display:none;">
+      <div class="card-title">合成记录</div>
+      <div id="testHistoryList"></div>
+    </div>
     <div id="testStatus" class="status"></div>
   </div>
 </main>
@@ -1082,6 +1086,39 @@ function loadTestProviders() {
   });
 }
 
+var testHistory = [];
+
+function base64ToBlob(base64, mime) {
+  var byteChars = atob(base64);
+  var bytes = new Uint8Array(byteChars.length);
+  for (var i = 0; i < byteChars.length; i++) {
+    bytes[i] = byteChars.charCodeAt(i);
+  }
+  return new Blob([bytes], { type: mime });
+}
+
+function renderTestHistory() {
+  var card = $("testHistoryCard");
+  var list = $("testHistoryList");
+  if (testHistory.length === 0) { card.style.display = "none"; return; }
+  card.style.display = "block";
+  list.innerHTML = testHistory.map(function(item, idx) {
+    return '<div class="list-item"><div class="info"><div class="primary">' +
+      escapeHtml(item.text.length > 60 ? item.text.slice(0, 60) + "..." : item.text) +
+      '</div><div class="meta">' + item.time + " | " + item.meta + "</div></div>" +
+      '<div class="actions"><button class="btn btn-sm play-history" data-idx="' + idx + '">播放</button></div></div>';
+  }).join("");
+  list.querySelectorAll(".play-history").forEach(function(btn) {
+    btn.addEventListener("click", function() {
+      var item = testHistory[parseInt(this.dataset.idx)];
+      $("testAudio").src = item.url;
+      $("testResult").style.display = "block";
+      $("testMeta").textContent = item.meta;
+      $("testAudio").play();
+    });
+  });
+}
+
 $("testTtsBtn").addEventListener("click", function() {
   var text = $("testText").value.trim();
   if (!text) { showStatus($("testStatus"), "请输入测试文本", "error"); return; }
@@ -1101,7 +1138,7 @@ $("testTtsBtn").addEventListener("click", function() {
       loading.textContent = "";
       return;
     }
-    var wav = "data:" + res.mime + ";base64," + res.data;
+    var wav = URL.createObjectURL(base64ToBlob(res.data, res.mime));
     $("testAudio").src = wav;
     $("testResult").style.display = "block";
     $("testMeta").textContent = "耗时 " + res.elapsed_seconds + " 秒 | " +
@@ -1109,6 +1146,17 @@ $("testTtsBtn").addEventListener("click", function() {
         ? (res.size_bytes / 1024).toFixed(1) + " KB"
         : (res.size_bytes / 1024 / 1024).toFixed(1) + " MB");
     $("testAudio").play();
+
+    // 合成记录
+    testHistory.unshift({
+      text: text,
+      url: wav,
+      meta: $("testMeta").textContent,
+      time: new Date().toLocaleTimeString(),
+    });
+    if (testHistory.length > 20) testHistory.pop();
+    renderTestHistory();
+
     btn.disabled = false;
     loading.textContent = "";
   }).catch(function(e) {
