@@ -168,6 +168,9 @@ class Main(Star):
             self.context.register_web_api(
                 f"{prefix}/get_recent_sessions", self.handle_get_recent_sessions, ["GET"], "最近会话列表"
             )
+            self.context.register_web_api(
+                f"{prefix}/panel", self.handle_serve_panel, ["GET"], "管理面板（独立页面，无沙箱）"
+            )
             logger.info(f"AI Voice Assistant WebUI API 已注册（{prefix}）")
         except Exception as e:
             logger.warning(f"WebUI API 注册失败（非致命）: {e}")
@@ -542,6 +545,18 @@ class Main(Star):
             return jsonify({"success": False, "error": "文件不存在"})
         logger.info(f"[serve_archive] 发送: {fpath}")
         return await send_file(fpath)
+
+    async def handle_serve_panel(self):
+        """返回独立管理面板 HTML（不在 iframe 内，无沙箱限制）。"""
+        from quart import send_file
+        import os
+        panel_path = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)),
+            "pages", "webui", "standalone.html",
+        )
+        if not os.path.isfile(panel_path):
+            return jsonify({"success": False, "error": "面板文件未找到"})
+        return await send_file(panel_path, mimetype="text/html; charset=utf-8")
 
     async def handle_get_archive_file(self):
         """返回归档文件的 base64 数据（供 bridge API 调用，用于 iframe 内播放）。"""
