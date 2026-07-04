@@ -1,17 +1,14 @@
 """
 AI Voice Assistant — 自定义 API 云存储 Provider
 ================================================
-使用 multipart/form-data POST 上传到用户自定义 API。
+使用 aiohttp multipart/form-data POST 上传到用户自定义 API。
 """
 import json as _json
 import os
-import random
-from datetime import datetime
 from typing import Optional
 
 from astrbot.api import logger
 
-from ..errors import CurlNotFoundError
 from .base import CloudProvider
 
 
@@ -30,68 +27,79 @@ def _extract_json_path(body: str, json_path: str) -> Optional[str]:
 
 
 class CustomApiProvider(CloudProvider):
-    """用户自定义 API Provider。"""
+    """用户自定义 API Provider（aiohttp multipart POST）。"""
 
     async def upload(self, file_path: str, text: str) -> Optional[str]:
-        curl_path = self._ensure_curl()
+        import aiohttp
 
         url = (self.config.get("cloud_custom_url") or "").strip()
         if not url:
             logger.warning("[tts_cloud] cloud_custom_url 未配置，跳过")
             return None
 
+        if not os.path.exists(file_path):
+            logger.warning(f"[tts_cloud] 自定义上传: 文件不存在 {file_path}")
+            return None
+
         headers_raw = (self.config.get("cloud_custom_headers") or "").strip()
         body_raw = (self.config.get("cloud_custom_body") or "").strip()
         result_path = (self.config.get("cloud_custom_result_path") or "").strip()
 
-        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-        uid = f"{random.randint(100000, 999999):06d}"
-        filename = f"voice_{ts}_{uid}.wav"
-
-        cmd = [curl_path, "-f", "-s", "-X", "POST"]
+        # 解析额外请求头
+        extra_headers = {}
         for line in headers_raw.splitlines():
             line = line.strip()
             if ":" in line:
-                cmd.extend(["-H", line])
-        cmd.extend(["-F", f"file=@{file_path};filename={filename}"])
+                k, _, v = line.partition(":")
+                extra_headers[k.strip()] = v.strip()
+
+        # 构造 multipart 表单
+        data = aiohttp.FormData()
+        data.add_field(
+            "file",
+            open(file_path, "rb"),
+            filename=os.path.basename(file_path),
+            content_type="audio/wav",
+        )
         if body_raw:
             try:
                 body_obj = _json.loads(body_raw)
                 for k, v in body_obj.items():
-                    cmd.extend(["-F", f"{k}={v}"])
+                    data.add_field(k, str(v))
             except _json.JSONDecodeError:
                 logger.warning("[tts_cloud] cloud_custom_body 不是合法 JSON，跳过")
 
-        cmd.append(url)
-
         try:
-            returncode, stdout, stderr = await self._run_curl(cmd)
-            if returncode != 0:
-                logger.warning(
-                    f"[tts_cloud] 自定义上传失败 (exit={returncode}): "
-                    f"{stderr[:200]}"
-                )
-                return None
+            async with aiohttp.ClientSession(headers=extra_headers) as session:
+                async with session.post(url, data=data, timeout=aiohttp.ClientTimeout(total=self.UPLOAD_TIMEOUT)) as resp:
+                    body = await resp.text()
+                    if resp.status != 200:
+                        logger.warning(
+                            f"[tts_cloud] 自定义上传失败 (HTTP {resp.status}): "
+                            f"{body[:200]}"
+                        )
+                        return None
 
-            if result_path:
-                got = _extract_json_path(stdout, result_path)
-                if got:
-                    logger.info(f"[tts_cloud] 自定义上传成功 → {got}")
-                    return got
-                else:
-                    logger.warning(
-                        f"[tts_cloud] 自定义上传成功，未能从响应提取 URL "
-                        f"(path={result_path})"
-                    )
-                    return None
-            else:
-                logger.info("[tts_cloud] 自定义上传成功")
-                return None  # 无 result_path 时不知道 URL
-        except CurlNotFoundError:
-            logger.warning("[tts_cloud] 未找到 curl，请确认 curl 已安装并在 PATH 中")
-            return None
+                    if result_path:
+                        got = _extract_json_path(body, result_path)
+                        if got:
+                            logger.info(f"[tts_cloud] 自定义上传成功 → {got}")
+                            return got
+                        else:
+                            logger.warning(
+                                f"[tts_cloud] 自定义上传成功，未能从响应提取 URL "
+                                f"(path={result_path})"
+                            )
+                            return None
+                    else:
+                        logger.info("[tts_cloud] 自定义上传成功")
+                        return None
+
         except __import__("asyncio").TimeoutError:
             logger.warning("[tts_cloud] 自定义上传超时")
+            return None
+        except aiohttp.ClientError as e:
+            logger.warning(f"[tts_cloud] 自定义上传网络错误: {e}")
             return None
         except Exception as e:
             logger.warning(f"[tts_cloud] 自定义上传异常: {e}")

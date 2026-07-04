@@ -1,24 +1,22 @@
 """
 AI Voice Assistant — WebDAV 云存储 Provider
 ============================================
-使用 curl -T 上传到 WebDAV 兼容存储。
+使用 aiohttp PUT 上传到 WebDAV 兼容存储。
 """
 import os
-import random
-from datetime import datetime
+import base64
 from typing import Optional
 
 from astrbot.api import logger
 
-from ..errors import CurlNotFoundError
 from .base import CloudProvider
 
 
 class WebDAVProvider(CloudProvider):
-    """WebDAV 兼容存储 Provider。"""
+    """WebDAV 兼容存储 Provider（aiohttp PUT）。"""
 
     async def upload(self, file_path: str, text: str) -> Optional[str]:
-        curl_path = self._ensure_curl()
+        import aiohttp
 
         url = (self.config.get("cloud_webdav_url") or "").strip()
         username = (self.config.get("cloud_webdav_username") or "").strip()
@@ -28,30 +26,45 @@ class WebDAVProvider(CloudProvider):
             logger.warning("[tts_cloud] cloud_webdav_url 未配置，跳过")
             return None
 
-        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-        uid = f"{random.randint(100000, 999999):06d}"
-        filename = f"voice_{ts}_{uid}.wav"
+        if not os.path.exists(file_path):
+            logger.warning(f"[tts_cloud] WebDAV 上传: 文件不存在 {file_path}")
+            return None
 
-        cmd = [curl_path, "-f", "-s", "-T", file_path]
+        ts = __import__("datetime").datetime.now().strftime("%Y%m%d_%H%M%S")
+        uid = f"{os.urandom(3).hex():06s}"
+        filename = f"voice_{ts}_{uid}.wav"
+        upload_url = f"{url.rstrip('/')}/{self._cloud_prefix()}/{filename}"
+
+        # Basic 认证头
+        headers = {}
         if username and password:
-            cmd.extend(["-u", f"{username}:{password}"])
-        cmd.append(f"{url.rstrip('/')}/{self._cloud_prefix()}/{filename}")
+            auth = base64.b64encode(f"{username}:{password}".encode()).decode()
+            headers["Authorization"] = f"Basic {auth}"
 
         try:
-            returncode, stdout, stderr = await self._run_curl(cmd)
-            if returncode == 0:
-                logger.info(f"[tts_cloud] WebDAV 上传成功: {filename}")
-                return filename
-            else:
-                logger.warning(
-                    f"[tts_cloud] WebDAV 上传失败 (exit={returncode}): {stderr[:200]}"
-                )
-                return None
-        except CurlNotFoundError:
-            logger.warning("[tts_cloud] 未找到 curl，请确认 curl 已安装并在 PATH 中")
-            return None
+            async with aiohttp.ClientSession(headers=headers) as session:
+                with open(file_path, "rb") as f:
+                    async with session.put(
+                        upload_url,
+                        data=f,
+                        timeout=aiohttp.ClientTimeout(total=self.UPLOAD_TIMEOUT),
+                    ) as resp:
+                        if resp.status in (200, 201, 204):
+                            logger.info(f"[tts_cloud] WebDAV 上传成功: {filename}")
+                            return filename
+                        else:
+                            text = await resp.text()
+                            logger.warning(
+                                f"[tts_cloud] WebDAV 上传失败 (HTTP {resp.status}): "
+                                f"{text[:200]}"
+                            )
+                            return None
+
         except __import__("asyncio").TimeoutError:
             logger.warning("[tts_cloud] WebDAV 上传超时")
+            return None
+        except aiohttp.ClientError as e:
+            logger.warning(f"[tts_cloud] WebDAV 上传网络错误: {e}")
             return None
         except Exception as e:
             logger.warning(f"[tts_cloud] WebDAV 上传异常: {e}")
