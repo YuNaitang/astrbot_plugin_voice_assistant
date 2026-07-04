@@ -623,6 +623,7 @@ audio { width: 100%; margin-top: 8px; }
       <div id="testResult" style="margin-top:16px; display:none;">
         <audio id="testAudio" controls></audio>
         <div id="testMeta" style="font-size:0.82rem; color:var(--overlay0); margin-top:8px;"></div>
+        <a id="testDownload" style="display:inline-block;margin-top:8px;font-size:0.82rem;color:var(--blue);cursor:pointer;text-decoration:underline;">下载音频文件</a>
       </div>
     </div>
     <div class="card" id="testHistoryCard" style="display:none;">
@@ -709,6 +710,15 @@ function base64ToBlob(base64, mime) {
 }
 
 // 尝试用 <audio> 播放 blob URL，如果失败则用 Web Audio API 直接解码
+// 预创建 AudioContext（必须用户手势后尽早创建，避免 async 回调丢失激活状态）
+var audioCtx = null;
+
+function getAudioCtx() {
+  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  if (audioCtx.state === "suspended") audioCtx.resume();
+  return audioCtx;
+}
+
 function playAudioData(base64, mime, audioEl, onEnd) {
   var arrayBuffer = base64ToArrayBuffer(base64);
   var blob = new Blob([arrayBuffer], { type: mime || "audio/wav" });
@@ -719,9 +729,9 @@ function playAudioData(base64, mime, audioEl, onEnd) {
   audioEl.onerror = function() {
     console.warn("playAudio: blob URL failed for <audio>, trying Web Audio API directly");
     audioEl.onerror = null;
-    // 方式 2: Web Audio API — 直接用 ArrayBuffer，不走 blob URL
+    // 方式 2: Web Audio API — 直接用 ArrayBuffer
     try {
-      var ctx = new (window.AudioContext || window.webkitAudioContext)();
+      var ctx = getAudioCtx();
       ctx.decodeAudioData(arrayBuffer.slice(0), function(buffer) {
         var source = ctx.createBufferSource();
         source.buffer = buffer;
@@ -1193,6 +1203,9 @@ $("testTtsBtn").addEventListener("click", function() {
       (res.size_bytes < 1024 * 1024
         ? (res.size_bytes / 1024).toFixed(1) + " KB"
         : (res.size_bytes / 1024 / 1024).toFixed(1) + " MB");
+    // 下载链接用 data URI 直接打开（绕过 iframe sandbox）
+    $("testDownload").href = "data:" + (res.mime || "audio/wav") + ";base64," + res.data;
+    $("testDownload").download = "tts_test.wav";
 
     testHistory.unshift({
       text: text,
