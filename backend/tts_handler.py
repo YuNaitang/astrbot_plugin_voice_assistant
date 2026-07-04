@@ -407,21 +407,8 @@ class TtsHandler:
         audio_paths: list[str],
         event: AstrMessageEvent,
     ):
-        """备用会话发送：将语音消息转发到指定会话（或默认发给 bot 自己）。
-
-        每条消息包含三要素：
-          1. 文件信息（文本描述 + 文件大小等元数据）
-          2. 语音消息（Record 组件）
-          3. 原始 WAV 文件（File 组件）
-        """
+        """将语音消息转发到备份群。支持分段逐条发送 + 汇总。"""
         backup = (self.config.get("backup_session_id") or "").strip()
-
-        is_private = True  # 默认私聊发送
-        if ":friend" in backup:
-            backup = backup.replace(":friend", "").strip()
-            is_private = True
-        elif ":group" in backup:
-            backup = backup.replace(":group", "").strip()
 
         # 未配置则默认发给 bot 自己
         if not backup or not backup.isdigit():
@@ -430,46 +417,87 @@ class TtsHandler:
                 logger.info("[ai_speak] 未配置备份会话且无法获取 bot 自身 ID，跳过")
                 return
             backup = self_id
-            is_private = True
-            logger.info(f"[ai_speak] 备份发送到 bot 自身: {backup}")
 
         session = MessageSesion(
             event.session.platform_id,
-            MessageType.FRIEND_MESSAGE if is_private else MessageType.GROUP_MESSAGE,
+            MessageType.GROUP_MESSAGE,
             backup,
         )
 
-        logger.info(f"[ai_speak] 备份发送到 QQ: {session}")
+        logger.info(f"[ai_speak] 备份发送到 QQ 群: {session}")
         try:
-            # 优先用 final_audio（单段或合并后），不存在时取第一段
-            audio_to_backup = final_audio or (audio_paths[0] if audio_paths else None)
-            if not audio_to_backup:
-                return
+            # ── 分段发送（多段且未合并）───────────────────────────
+            if not final_audio and audio_paths and len(audio_paths) > 1:
+                for i, (seg, ap) in enumerate(zip(segments, audio_paths)):
+                    if not os.path.exists(ap):
+                        logger.warning(
+                            f"[ai_speak] 备份: 音频文件不存在 {ap}，跳过段{i+1}"
+                        )
+                        continue
+                    await self._backup_send_triple(
+                        session,
+                        f"📁 语音备份 段{i+1}/{len(segments)}",
+                        seg,
+                        ap,
+                    )
 
-            if not os.path.exists(audio_to_backup):
-                logger.warning(f"[ai_speak] 备份发送: 音频文件不存在 {audio_to_backup}，跳过")
-                return
+                # 汇总
+                total_size = sum(
+                    os.path.getsize(ap) for ap in audio_paths
+                    if os.path.exists(ap)
+                )
+                summary = (
+                    f"📊 语音备份汇总\n"
+                    f"总段数: {len(segments)}\n"
+                    f"总大小: {self._format_bytes(total_size)}\n"
+                    f"全文: {len(text)} 字"
+                )
+                await self.context.send_message(session, MessageChain([Plain(summary)]))
 
-            display_text = text if len(text) <= 200 else text[:200] + "..."
-            size_str = self._format_file_size(audio_to_backup)
-            info = (
-                f"📁 语音备份"
-                f"{f' 段{i+1}/{len(segments)}' if not final_audio and audio_paths else ''}\n"
-                f"内容: {display_text}\n"
-                f"文件: {os.path.basename(audio_to_backup)}\n"
-                f"大小: {size_str}"
-            )
-            await self.context.send_message(
-                session,
-                MessageChain([
-                    Plain(info),
-                    Record.fromFileSystem(audio_to_backup),
-                    File(name=os.path.basename(audio_to_backup), file=audio_to_backup),
-                ]),
-            )
+            # ── 单段或合并后发送 ────────────────────────────────
+            else:
+                audio = final_audio or (audio_paths[0] if audio_paths else None)
+                if not audio or not os.path.exists(audio):
+                    return
+                await self._backup_send_triple(
+                    session, "📁 语音备份", text, audio,
+                )
+
             logger.info(f"[ai_speak] 备份发送完成: {session}")
         except Exception as e:
             logger.warning(f"[ai_speak] 备份发送失败 ({session}): {e}")
+
+    async def _backup_send_triple(
+        self,
+        session: MessageSesion,
+        title: str,
+        text_content: str,
+        audio_path: str,
+    ):
+        """向会话发送三个独立消息：文字信息 → 语音 → 原始文件。"""
+        display = text_content[:200] + "..." if len(text_content) > 200 else text_content
+        size_str = self._format_file_size(audio_path)
+        info = (
+            f"{title}\n"
+            f"内容: {display}\n"
+            f"文件: {os.path.basename(audio_path)}\n"
+            f"大小: {size_str}"
+        )
+        await self.context.send_message(session, MessageChain([Plain(info)]))
+        await self.context.send_message(session, MessageChain([Record.fromFileSystem(audio_path)]))
+        await self.context.send_message(
+            session,
+            MessageChain([File(name=os.path.basename(audio_path), file=audio_path)]),
+        )
+
+    @staticmethod
+    def _format_bytes(size: int) -> str:
+        """将字节数格式化为可读字符串。"""
+        if size < 1024:
+            return f"{size} B"
+        elif size < 1024 * 1024:
+            return f"{size / 1024:.1f} KB"
+        return f"{size / (1024 * 1024):.1f} MB"
 
     @staticmethod
     def _format_file_size(file_path: str) -> str:
