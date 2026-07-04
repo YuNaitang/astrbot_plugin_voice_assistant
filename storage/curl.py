@@ -1,4 +1,8 @@
-"""curl 可执行文件路径解析。"""
+"""
+curl 可执行文件路径解析。
+注意: 所有云上传 Provider 已改用 boto3 / aiohttp，不再依赖此模块。
+保留作为 SMB 等外部命令调用的备用工具。
+"""
 import shutil
 import subprocess
 from typing import Optional
