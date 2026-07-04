@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.1.1
+- 修复: 密码字段 AstrBot WebUI 自动脱敏覆盖 — 改名 `_passwd` 避开关键词
+- 新增: 独立 WebUI 服务器 — `webui.py` (Quart + Hypercorn)，端口 `webui_port` 可配置（默认 11180）
+- 新增: 云存储全链路 Python 化 — S3(boto3) + Custom(aiohttp) + WebDAV(aiohttp)，移除 curl 依赖
+- 增强: TTS 合成限流防护 — 段间间隔(`tts_inter_segment_delay`) + 指数退避重试(`tts_retry_max_attempts`)
+- 增强: 备份发送重建 — 每段信息/语音/文件三条独立消息 + 汇总 + 仅群号
+- 增强: `send_text_with_voice` 配置 — 控制是否同时发送文字（默认 false 仅语音）
+
 ## 2.1.0-beta
 - 品牌命名: 中文名正式定为「聆音」
 - 新增: 独立 WebUI 面板（`/panel` 端点，不受 AstrBot iframe 沙箱限制）
