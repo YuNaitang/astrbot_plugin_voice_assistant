@@ -3,9 +3,10 @@ AI Voice Assistant — S3 兼容云存储 Provider
 ============================================
 使用 boto3 (AWS SDK) 上传到任何 S3 兼容存储。
 """
+import asyncio
 import mimetypes
 import os
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Optional
 
 import boto3
@@ -87,7 +88,7 @@ class S3Provider(CloudProvider):
                     logger.warning(
                         f"[tts_cloud] S3 上传失败 ({code})，{self.RETRY_DELAY}s 后重试: {msg}"
                     )
-                    await __import__("asyncio").sleep(self.RETRY_DELAY)
+                    await asyncio.sleep(self.RETRY_DELAY)
                     continue
                 logger.warning(f"[tts_cloud] S3 上传失败 ({code}): {msg}")
                 return None
@@ -101,7 +102,7 @@ class S3Provider(CloudProvider):
                     logger.warning(
                         f"[tts_cloud] S3 上传异常，{self.RETRY_DELAY}s 后重试: {e}"
                     )
-                    await __import__("asyncio").sleep(self.RETRY_DELAY)
+                    await asyncio.sleep(self.RETRY_DELAY)
                     continue
                 logger.warning(f"[tts_cloud] S3 上传异常: {e}")
                 return None

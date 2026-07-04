@@ -108,7 +108,7 @@ class PermissionManager:
         try:
             config_path = os.path.join(
                 os.path.dirname(os.path.abspath(__file__)),
-                "..", "..", "data", "config",
+                "..", "..", "..", "data", "config",
                 "astrbot_plugin_voice_assistant.json",
             )
             config_path = os.path.normpath(config_path)

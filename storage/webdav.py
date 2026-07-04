@@ -3,8 +3,10 @@ AI Voice Assistant — WebDAV 云存储 Provider
 ============================================
 使用 aiohttp PUT 上传到 WebDAV 兼容存储。
 """
+import asyncio
 import os
 import base64
+from datetime import datetime
 from typing import Optional
 
 from astrbot.api import logger
@@ -30,7 +32,7 @@ class WebDAVProvider(CloudProvider):
             logger.warning(f"[tts_cloud] WebDAV 上传: 文件不存在 {file_path}")
             return None
 
-        ts = __import__("datetime").datetime.now().strftime("%Y%m%d_%H%M%S")
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
         uid = f"{os.urandom(3).hex():06s}"
         filename = f"voice_{ts}_{uid}.wav"
         upload_url = f"{url.rstrip('/')}/{self._cloud_prefix()}/{filename}"
@@ -60,7 +62,7 @@ class WebDAVProvider(CloudProvider):
                             )
                             return None
 
-        except __import__("asyncio").TimeoutError:
+        except asyncio.TimeoutError:
             logger.warning("[tts_cloud] WebDAV 上传超时")
             return None
         except aiohttp.ClientError as e:

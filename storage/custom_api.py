@@ -3,6 +3,7 @@ AI Voice Assistant — 自定义 API 云存储 Provider
 ================================================
 使用 aiohttp multipart/form-data POST 上传到用户自定义 API。
 """
+import asyncio
 import json as _json
 import os
 from typing import Optional
@@ -55,12 +56,13 @@ class CustomApiProvider(CloudProvider):
 
         # 构造 multipart 表单
         data = aiohttp.FormData()
-        data.add_field(
-            "file",
-            open(file_path, "rb"),
-            filename=os.path.basename(file_path),
-            content_type="audio/wav",
-        )
+        with open(file_path, "rb") as f:
+            data.add_field(
+                "file",
+                f.read(),
+                filename=os.path.basename(file_path),
+                content_type="audio/wav",
+            )
         if body_raw:
             try:
                 body_obj = _json.loads(body_raw)
@@ -95,7 +97,7 @@ class CustomApiProvider(CloudProvider):
                         logger.info("[tts_cloud] 自定义上传成功")
                         return None
 
-        except __import__("asyncio").TimeoutError:
+        except asyncio.TimeoutError:
             logger.warning("[tts_cloud] 自定义上传超时")
             return None
         except aiohttp.ClientError as e:
