@@ -39,6 +39,18 @@
     "default": 80,
     "hint": "长文本按「换行 → 句号」分割后每段最多 N 字符。建议 60 ~ 120，越小越自然但段数越多"
   },
+  "tts_inter_segment_delay": {
+    "description": "段间间隔（秒）",
+    "type": "float",
+    "default": 0.3,
+    "hint": "每段合成之间等待 N 秒，避免 TTS API 限流。0 = 不等待。建议 0.2 ~ 1.0"
+  },
+  "tts_retry_max_attempts": {
+    "description": "合成失败重试次数",
+    "type": "int",
+    "default": 2,
+    "hint": "某段合成失败时最多重试 N 次，每次等待时间翻倍。0 = 不重试"
+  },
   "tts_merge_enabled": {
     "description": "合并多段语音",
     "type": "bool",

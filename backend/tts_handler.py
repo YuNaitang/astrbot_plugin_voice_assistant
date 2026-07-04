@@ -287,24 +287,49 @@ class TtsHandler:
     async def _synthesize_segments(
         self, provider: TTSProvider, segments: list[str]
     ) -> list[str]:
+        delay = self.config.get("tts_inter_segment_delay", 0.3)
+        max_attempts = self.config.get("tts_retry_max_attempts", 2)
+
         audio_paths = []
         for i, seg in enumerate(segments):
-            try:
-                logger.info(f"[ai_speak] TTS合成 段{i+1}/{len(segments)}: text={seg!r}")
-                audio_path = await provider.get_audio(seg)
-                logger.info(f"[ai_speak] TTS合成完成 段{i+1}: path={audio_path}")
-                audio_paths.append(audio_path)
-                self._temp_files.append(audio_path)
-            except Exception as e:
-                provider_id = "?"
+            # 段间间隔：避免 TTS API 限流
+            if i > 0 and delay > 0:
+                await asyncio.sleep(delay)
+
+            for attempt in range(1 + max_attempts):
                 try:
-                    provider_id = provider.meta().id
-                except Exception:
-                    pass
-                logger.error(f"[ai_speak] TTS合成失败 段{i+1} (provider={provider_id}): {e}")
-                raise TTSProviderError(
-                    f"语音合成失败（{provider_id}）：{e!s}"
-                ) from e
+                    logger.info(
+                        f"[ai_speak] TTS合成 段{i+1}/{len(segments)}: "
+                        f"text={seg!r}{f' (retry {attempt})' if attempt else ''}"
+                    )
+                    audio_path = await provider.get_audio(seg)
+                    logger.info(f"[ai_speak] TTS合成完成 段{i+1}: path={audio_path}")
+                    audio_paths.append(audio_path)
+                    self._temp_files.append(audio_path)
+                    break  # 成功，跳出重试循环
+                except Exception as e:
+                    provider_id = "?"
+                    try:
+                        provider_id = provider.meta().id
+                    except Exception:
+                        pass
+
+                    if attempt < max_attempts:
+                        wait = 2 ** attempt  # 指数退避: 1s, 2s, 4s...
+                        logger.warning(
+                            f"[ai_speak] TTS合成 段{i+1} 失败，{wait}s 后重试 "
+                            f"({attempt+1}/{max_attempts}) "
+                            f"(provider={provider_id}): {e}"
+                        )
+                        await asyncio.sleep(wait)
+                    else:
+                        logger.error(
+                            f"[ai_speak] TTS合成失败 段{i+1} "
+                            f"(provider={provider_id}): {e}"
+                        )
+                        raise TTSProviderError(
+                            f"语音合成失败（{provider_id}）：{e!s}"
+                        ) from e
         return audio_paths
 
     async def _merge_audio(self, audio_paths: list[str]) -> Optional[str]:
