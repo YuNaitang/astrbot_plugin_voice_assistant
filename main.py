@@ -575,7 +575,21 @@ class Main(Star):
             provider_id = data.get("provider_id", "") or self.config.get("tts_provider_id", "")
             provider = None
             if provider_id:
+                # 尝试通过注册 ID 查找
                 provider = self.tts._resolve_provider(provider_id)
+                if not provider:
+                    # 可能 provider_id 是 meta.id（显示名），遍历所有 Provider 匹配
+                    try:
+                        all_providers = self.context.get_all_tts_providers()
+                        for p in all_providers:
+                            try:
+                                if p.meta().id == provider_id:
+                                    provider = p
+                                    break
+                            except Exception:
+                                pass
+                    except Exception:
+                        pass
                 if not provider:
                     logger.warning(f"[test_tts] 指定 Provider '{provider_id}' 未找到，尝试自动选择")
             if not provider:
