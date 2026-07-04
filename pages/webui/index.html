@@ -328,12 +328,16 @@ audio { width: 100%; margin-top: 8px; }
         </div>
         <div class="field">
           <label>首选 TTS 引擎（TTS Provider）</label>
-          <input id="cfg_tts_provider_id" placeholder="留空则使用系统默认" />
+          <select id="cfg_tts_provider_id">
+            <option value="">-- 系统默认 --</option>
+          </select>
           <div class="field-hint">在 AstrBot 已注册的 TTS Provider 中选择 ID。留空则使用系统全局默认</div>
         </div>
         <div class="field">
           <label>备用 TTS 引擎（Fallback Provider）</label>
-          <input id="cfg_tts_fallback_provider_id" placeholder="留空则不启用降级" />
+          <select id="cfg_tts_fallback_provider_id">
+            <option value="">-- 不使用降级 --</option>
+          </select>
           <div class="field-hint">首选不可用时自动切换到此处。留空则不启用降级</div>
         </div>
       </div>
@@ -553,7 +557,8 @@ audio { width: 100%; margin-top: 8px; }
       <div style="margin-top:16px; display:flex; gap:12px; align-items:end; flex-wrap:wrap;">
         <div class="field" style="flex:1; min-width:200px; margin-bottom:0;">
           <label>会话 ID</label>
-          <input id="permNewSession" placeholder="QQ 号/会话 ID" />
+          <input id="permNewSession" list="sessionList" placeholder="QQ 号/会话 ID" />
+          <datalist id="sessionList"></datalist>
         </div>
         <div class="field" style="width:180px; margin-bottom:0;">
           <label>等级</label>
@@ -608,8 +613,10 @@ audio { width: 100%; margin-top: 8px; }
       </div>
       <div class="field">
         <label>目标 Provider（可选）</label>
-        <input id="testProvider" placeholder="留空使用系统默认" />
-        <div class="field-hint">留空则使用当前配置的首选 Provider。常见 ID: edge-tts, baidu-tts, openai-tts,火山引擎等。可在 AstrBot 的 TTS Provider 设置中查看完整列表</div>
+        <select id="testProvider">
+          <option value="">-- 使用配置默认 --</option>
+        </select>
+        <div class="field-hint">留空则使用当前配置的首选 Provider</div>
       </div>
       <button class="btn" id="testTtsBtn">合成并试听</button>
       <span id="testLoading" class="loading-text"></span>
@@ -779,12 +786,35 @@ function loadSettings() {
       var val = cfg[key];
       if (el.type === "checkbox") {
         el.checked = val === true || val === "true";
+      } else if (el.tagName === "SELECT") {
+        el.value = val != null ? String(val) : "";
       } else {
         el.value = val != null ? String(val) : "";
       }
     });
     // 云存储后端切换
     updateCloudFields();
+    loadProviderOptions();
+  });
+}
+
+function loadProviderOptions() {
+  bridge.apiGet("get_tts_providers").then(function(res) {
+    if (!res.success) return;
+    var primary = $("cfg_tts_provider_id");
+    var fallback = $("cfg_tts_fallback_provider_id");
+    if (!primary || !fallback) return;
+    var options = '<option value="">-- 系统默认 --</option>';
+    var fallbackOptions = '<option value="">-- 不使用降级 --</option>';
+    (res.providers || []).forEach(function(p) {
+      var label = p.name + (p.model ? " (" + p.model + ")" : "");
+      options += '<option value="' + p.id + '">' + label + '</option>';
+      fallbackOptions += '<option value="' + p.id + '">' + label + '</option>';
+    });
+    primary.innerHTML = options;
+    fallback.innerHTML = fallbackOptions;
+    primary.value = res.current_id || "";
+    fallback.value = res.fallback_id || "";
   });
 }
 
@@ -865,6 +895,17 @@ function loadPermissions() {
         });
       });
     }
+  });
+}
+
+function loadSessionList() {
+  bridge.apiGet("get_recent_sessions").then(function(res) {
+    if (!res.success) return;
+    var dl = $("sessionList");
+    if (!dl) return;
+    dl.innerHTML = (res.sessions || []).map(function(s) {
+      return '<option value="' + s + '">';
+    }).join("");
   });
 }
 
@@ -1028,6 +1069,19 @@ function loadArchive() {
 // ============================================================
 // TTS 测试
 // ============================================================
+function loadTestProviders() {
+  bridge.apiGet("get_tts_providers").then(function(res) {
+    if (!res.success) return;
+    var sel = $("testProvider");
+    if (!sel) return;
+    var html = '<option value="">-- 使用配置默认 --</option>';
+    (res.providers || []).forEach(function(p) {
+      html += '<option value="' + p.id + '">' + p.name + (p.model ? " (" + p.model + ")" : "") + '</option>';
+    });
+    sel.innerHTML = html;
+  });
+}
+
 $("testTtsBtn").addEventListener("click", function() {
   var text = $("testText").value.trim();
   if (!text) { showStatus($("testStatus"), "请输入测试文本", "error"); return; }
@@ -1070,6 +1124,8 @@ $("testTtsBtn").addEventListener("click", function() {
 (function init() {
   (bridge.ready() || Promise.resolve()).then(function() {
     loadDashboard();
+    loadTestProviders();
+    loadSessionList();
   });
 })();
 </script>

@@ -159,6 +159,12 @@ class Main(Star):
             self.context.register_web_api(
                 f"{prefix}/test_tts", self.handle_test_tts, ["POST"], "TTS 测试合成"
             )
+            self.context.register_web_api(
+                f"{prefix}/get_tts_providers", self.handle_get_tts_providers, ["GET"], "TTS 提供商列表"
+            )
+            self.context.register_web_api(
+                f"{prefix}/get_recent_sessions", self.handle_get_recent_sessions, ["GET"], "最近会话列表"
+            )
             logger.info(f"AI Voice Assistant WebUI API 已注册（{prefix}）")
         except Exception as e:
             logger.warning(f"WebUI API 注册失败（非致命）: {e}")
@@ -592,3 +598,53 @@ class Main(Star):
             })
         except Exception as e:
             return jsonify({"success": False, "error": str(e)})
+
+    async def handle_get_tts_providers(self):
+        """返回可用的 TTS Provider 列表。"""
+        from quart import jsonify
+        providers = []
+        try:
+            all_providers = self.context.get_all_tts_providers()
+            for p in all_providers:
+                try:
+                    meta = p.meta()
+                    providers.append({
+                        "id": meta.id,
+                        "name": meta.id,
+                        "model": meta.model or "",
+                    })
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        return jsonify({
+            "success": True,
+            "providers": providers,
+            "current_id": self.config.get("tts_provider_id", ""),
+            "fallback_id": self.config.get("tts_fallback_provider_id", ""),
+        })
+
+    async def handle_get_recent_sessions(self):
+        """返回最近活跃的会话列表。"""
+        from quart import jsonify
+        sessions = set()
+        # From density controller
+        for sid in getattr(self.tts.density, "_voice_timeline", {}):
+            if sid:
+                sessions.add(sid[:30])  # truncate long IDs
+        # From recent calls
+        for call in getattr(self.tts, "_recent_calls", []):
+            sid = call.get("session_id", "")
+            if sid:
+                sessions.add(sid[:30])
+        # From permissions
+        for entry in (self.config.get("session_permissions", []) or []):
+            entry = entry.strip()
+            if ":" in entry:
+                sid = entry.rsplit(":", 1)[0].strip()
+                if sid:
+                    sessions.add(sid[:30])
+        return jsonify({
+            "success": True,
+            "sessions": sorted(sessions)[:50],
+        })
