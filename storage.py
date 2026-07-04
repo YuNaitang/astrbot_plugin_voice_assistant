@@ -77,13 +77,13 @@ class AudioStorage:
         try:
             ts = datetime.now().strftime("%Y%m%d_%H%M%S")
             uid = random.randint(100000, 999999)
-            basename = f"tts_{ts}_{uid}.wav"
+            basename = f"voice_{ts}_{uid}.wav"
             dest = os.path.join(self._storage_dir, basename)
             counter = 1
             while os.path.exists(dest):
                 dest = os.path.join(
                     self._storage_dir,
-                    f"tts_{ts}_{uid}_{counter}.wav",
+                    f"voice_{ts}_{uid}_{counter}.wav",
                 )
                 counter += 1
             os.rename(audio_path, dest)
@@ -137,7 +137,7 @@ class AudioStorage:
 
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
         uid = f"{random.randint(100000, 999999):06d}"
-        filename = f"tts_{ts}_{uid}.wav"
+        filename = f"voice_{ts}_{uid}.wav"
 
         cmd = ["curl", "-f", "-s", "-X", "POST"]
         for line in headers_raw.splitlines():
@@ -186,6 +186,8 @@ class AudioStorage:
                     logger.info("[tts_cloud] 自定义上传成功")
             except asyncio.TimeoutError:
                 logger.warning("[tts_cloud] 自定义上传超时")
+            except FileNotFoundError:
+                logger.warning("[tts_cloud] 未找到 curl，请确认 curl 已安装并在 PATH 中")
             except Exception as e:
                 logger.warning(f"[tts_cloud] 自定义上传异常: {e}")
 
@@ -219,7 +221,7 @@ class AudioStorage:
 
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
         uid = f"{random.randint(100000, 999999):06d}"
-        key = f"tts_{ts}_{uid}.wav"
+        key = f"voice_{ts}_{uid}.wav"
 
         if path_style:
             upload_url = f"{endpoint.rstrip('/')}/{bucket}/{key}"
@@ -246,6 +248,8 @@ class AudioStorage:
                     logger.warning(f"[tts_cloud] S3 上传失败 (exit={proc.returncode}): {stderr.decode()[:200]}")
             except asyncio.TimeoutError:
                 logger.warning("[tts_cloud] S3 上传超时")
+            except FileNotFoundError:
+                logger.warning("[tts_cloud] 未找到 curl，请确认 curl 已安装并在 PATH 中")
             except Exception as e:
                 logger.warning(f"[tts_cloud] S3 上传异常: {e}")
 
@@ -267,7 +271,7 @@ class AudioStorage:
 
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
         uid = f"{random.randint(100000, 999999):06d}"
-        filename = f"tts_{ts}_{uid}.wav"
+        filename = f"voice_{ts}_{uid}.wav"
 
         cmd = ["curl", "-f", "-s", "-T", file_path]
         if username and password:
@@ -284,6 +288,8 @@ class AudioStorage:
                     logger.warning(f"[tts_cloud] WebDAV 上传失败 (exit={proc.returncode}): {stderr.decode()[:200]}")
             except asyncio.TimeoutError:
                 logger.warning("[tts_cloud] WebDAV 上传超时")
+            except FileNotFoundError:
+                logger.warning("[tts_cloud] 未找到 curl，请确认 curl 已安装并在 PATH 中")
             except Exception as e:
                 logger.warning(f"[tts_cloud] WebDAV 上传异常: {e}")
 
@@ -306,7 +312,7 @@ class AudioStorage:
 
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
         uid = f"{random.randint(100000, 999999):06d}"
-        filename = f"tts_{ts}_{uid}.wav"
+        filename = f"voice_{ts}_{uid}.wav"
 
         async def _upload():
             try:
@@ -327,6 +333,9 @@ class AudioStorage:
                 try:
                     norm_share = share.replace("/", "\\")
                     dest = os.path.join(norm_share, filename)
+                    parent = os.path.dirname(dest)
+                    if parent:
+                        os.makedirs(parent, exist_ok=True)
                     shutil.copy2(file_path, dest)
                     logger.info(f"[tts_cloud] SMB 复制成功: {dest}")
                 except Exception as e2:
