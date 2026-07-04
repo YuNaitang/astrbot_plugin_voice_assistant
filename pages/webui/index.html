@@ -1107,7 +1107,6 @@ function loadArchive() {
     $("archiveList").querySelectorAll(".del-btn").forEach(function(btn) {
       btn.addEventListener("click", function() {
         var name = this.dataset.name;
-        if (!confirm("确定删除 " + name + "?")) return;
         bridge.apiPost("delete_archive", { name: name }).then(function(r) {
           if (r.success) {
             showStatus($("archiveStatus"), "已删除", "success");
@@ -1180,6 +1179,8 @@ function renderTestHistory() {
 $("testTtsBtn").addEventListener("click", function() {
   var text = $("testText").value.trim();
   if (!text) { showStatus($("testStatus"), "请输入测试文本", "error"); return; }
+  // 在异步 API 调用前创建 AudioContext（用户手势还存活）
+  getAudioCtx();
   var btn = this;
   var loading = $("testLoading");
   btn.disabled = true;
