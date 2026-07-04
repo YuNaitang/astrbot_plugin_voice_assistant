@@ -57,6 +57,9 @@ class TtsHandler:
         self.archive = LocalArchive(self.config)
         self._cloud_provider: Optional[CloudProvider] = None
 
+        # WebUI 仪表盘用：最近调用记录环状缓冲区
+        self._recent_calls: list[dict] = []
+
     # ── 终止清理 ──────────────────────────────────────────────
 
     def cleanup_temp_files(self):
@@ -183,6 +186,17 @@ class TtsHandler:
             f"[ai_speak] <<< 完成 session={session_id} user={user_id} "
             f"segments={len(segments)}"
         )
+        # 记录到 WebUI 最近调用缓冲区
+        self._recent_calls.append({
+            "time": datetime.now().isoformat(),
+            "text": text[:100],
+            "success": result_msg is not None,
+            "segments": len(segments),
+            "session_id": session_id,
+        })
+        if len(self._recent_calls) > 50:
+            self._recent_calls.pop(0)
+
         return result_msg
 
     # ── 速率限制 ──────────────────────────────────────────────
