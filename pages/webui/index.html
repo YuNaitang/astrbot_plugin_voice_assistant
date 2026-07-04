@@ -681,7 +681,6 @@ if (!window.AstrBotPluginPage) {
 }
 
 var bridge = window.AstrBotPluginPage;
-var PLUGIN_PREFIX = "astrbot_plugin_voice_assistant";
 
 function $(id) { return document.getElementById(id); }
 function escapeHtml(s) {
@@ -715,7 +714,7 @@ document.querySelector(".sidebar").addEventListener("click", function(e) {
 // 仪表盘
 // ============================================================
 function loadDashboard() {
-  bridge.apiGet(PLUGIN_PREFIX + "/get_status").then(function(res) {
+  bridge.apiGet("get_status").then(function(res) {
     if (!res.success) return;
     var s = res.status;
     $("statVoice").textContent = s.voice_enabled ? "已开启" : "已关闭";
@@ -771,7 +770,7 @@ var CONFIG_FIELDS = [
 ];
 
 function loadSettings() {
-  bridge.apiGet(PLUGIN_PREFIX + "/get_config").then(function(res) {
+  bridge.apiGet("get_config").then(function(res) {
     if (!res.success) return;
     var cfg = res.config || {};
     CONFIG_FIELDS.forEach(function(key) {
@@ -816,7 +815,7 @@ $("saveConfigBtn").addEventListener("click", function() {
       cfg[key] = el.value;
     }
   });
-  bridge.apiPost(PLUGIN_PREFIX + "/save_config", { config: cfg }).then(function(res) {
+  bridge.apiPost("save_config", { config: cfg }).then(function(res) {
     if (res.success) {
       showStatus($("configStatus"), "配置已保存", "success");
     } else {
@@ -835,7 +834,7 @@ $("saveConfigBtn").addEventListener("click", function() {
 // 权限管理
 // ============================================================
 function loadPermissions() {
-  bridge.apiGet(PLUGIN_PREFIX + "/get_permissions").then(function(res) {
+  bridge.apiGet("get_permissions").then(function(res) {
     if (!res.success) return;
     var p = res.permissions || {};
     $("permDefault").value = String(p.default_level || 1);
@@ -854,7 +853,7 @@ function loadPermissions() {
       $("permList").querySelectorAll(".btn-danger").forEach(function(btn) {
         btn.addEventListener("click", function() {
           var sid = this.dataset.sid;
-          bridge.apiPost(PLUGIN_PREFIX + "/set_permission", { action: "del", session_id: sid })
+          bridge.apiPost("set_permission", { action: "del", session_id: sid })
             .then(function(r) {
               if (r.success) {
                 showStatus($("permStatus"), "已删除", "success");
@@ -873,7 +872,7 @@ $("permAddBtn").addEventListener("click", function() {
   var sid = $("permNewSession").value.trim();
   var level = parseInt($("permNewLevel").value);
   if (!sid) { showStatus($("permStatus"), "请输入会话 ID", "error"); return; }
-  bridge.apiPost(PLUGIN_PREFIX + "/set_permission", { action: "set", session_id: sid, level: level })
+  bridge.apiPost("set_permission", { action: "set", session_id: sid, level: level })
     .then(function(r) {
       if (r.success) {
         showStatus($("permStatus"), "已添加", "success");
@@ -891,7 +890,7 @@ $("permAddBtn").addEventListener("click", function() {
 var densityChart = null;
 
 function loadStatistics() {
-  bridge.apiGet(PLUGIN_PREFIX + "/get_density_stats").then(function(res) {
+  bridge.apiGet("get_density_stats").then(function(res) {
     if (!res.success) return;
     var stats = res.stats || {};
 
@@ -953,7 +952,7 @@ function loadStatistics() {
 // 归档
 // ============================================================
 function loadArchive() {
-  bridge.apiGet(PLUGIN_PREFIX + "/get_archive_list").then(function(res) {
+  bridge.apiGet("get_archive_list").then(function(res) {
     if (!res.success) return;
     $("archiveInfo").textContent = "路径: " + (res.path || "-") +
       " | 保留: " + (res.retention_days || 0) + " 天" +
@@ -979,7 +978,7 @@ function loadArchive() {
     $("archiveList").querySelectorAll(".play-btn").forEach(function(btn) {
       btn.addEventListener("click", function() {
         var name = this.dataset.name;
-        bridge.apiGet(PLUGIN_PREFIX + "/get_archive_file", { name: name }).then(function(r) {
+        bridge.apiGet("get_archive_file", { name: name }).then(function(r) {
           if (!r.success) { showStatus($("archiveStatus"), r.error || "获取失败", "error"); return; }
           var wav = "data:" + r.mime + ";base64," + r.data;
           var existing = $("archivePlayer");
@@ -1000,7 +999,7 @@ function loadArchive() {
       btn.addEventListener("click", function() {
         var name = this.dataset.name;
         if (!confirm("确定删除 " + name + "?")) return;
-        bridge.apiPost(PLUGIN_PREFIX + "/delete_archive", { name: name }).then(function(r) {
+        bridge.apiPost("delete_archive", { name: name }).then(function(r) {
           if (r.success) {
             showStatus($("archiveStatus"), "已删除", "success");
             loadArchive();
@@ -1014,7 +1013,7 @@ function loadArchive() {
     $("archiveList").querySelectorAll(".download-btn").forEach(function(btn) {
       btn.addEventListener("click", function() {
         var name = this.dataset.name;
-        bridge.apiGet(PLUGIN_PREFIX + "/get_archive_file", { name: name }).then(function(r) {
+        bridge.apiGet("get_archive_file", { name: name }).then(function(r) {
           if (!r.success) return;
           var a = document.createElement("a");
           a.href = "data:" + r.mime + ";base64," + r.data;
@@ -1038,7 +1037,7 @@ $("testTtsBtn").addEventListener("click", function() {
   loading.textContent = "合成中...";
   $("testResult").style.display = "none";
 
-  bridge.apiPost(PLUGIN_PREFIX + "/test_tts", {
+  bridge.apiPost("test_tts", {
     text: text,
     provider_id: $("testProvider").value.trim(),
   }).then(function(res) {
