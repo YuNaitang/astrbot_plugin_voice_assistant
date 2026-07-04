@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.5.2
+- 修复: 备份发送失败 — `send_by_session` → `send_message`（Context 无此方法）
+- 修复: 云存储上传异常 — curl PATH 解析兼容性（`execvp` ENOTDIR 跨平台修复）
+- 修复: 本地归档跨盘符失败 — `os.rename` → `shutil.move`
+
 ## 1.5.1
 - 新增 CHANGELOG.md，版本历史迁移至独立文件
 - 补充 metadata.yaml 字段（tags / category）

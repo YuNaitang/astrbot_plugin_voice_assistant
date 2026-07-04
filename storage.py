@@ -7,6 +7,7 @@ import asyncio
 import json as _json
 import os
 import random
+import shutil
 from datetime import datetime, timedelta
 from typing import Optional
 
@@ -91,7 +92,7 @@ class AudioStorage:
                     f"voice_{ts}_{uid}_{counter}.wav",
                 )
                 counter += 1
-            os.rename(audio_path, dest)
+            shutil.move(audio_path, dest)
             logger.info(f"[tts_storage] 已归档: {dest}")
             return dest
         except Exception as e:
@@ -131,6 +132,11 @@ class AudioStorage:
 
     def _put_custom(self, file_path: str, text: str) -> None:
         """自定义 API: multipart/form-data 上传 + JSON 路径提取 URL。"""
+        curl_path = shutil.which("curl")
+        if not curl_path:
+            logger.warning("[tts_cloud] 未找到 curl，跳过上传")
+            return
+
         url = (self.config.get("cloud_custom_url") or "").strip()
         if not url:
             logger.warning("[tts_cloud] cloud_custom_url 未配置，跳过")
@@ -144,7 +150,7 @@ class AudioStorage:
         uid = f"{random.randint(100000, 999999):06d}"
         filename = f"voice_{ts}_{uid}.wav"
 
-        cmd = ["curl", "-f", "-s", "-X", "POST"]
+        cmd = [curl_path, "-f", "-s", "-X", "POST"]
         for line in headers_raw.splitlines():
             line = line.strip()
             if ":" in line:
@@ -235,8 +241,13 @@ class AudioStorage:
             e = endpoint.rstrip("/").lstrip("https://").lstrip("http://")
             upload_url = f"https://{bucket}.{e}/{prefix}/{key}"
 
+        curl_path = shutil.which("curl")
+        if not curl_path:
+            logger.warning("[tts_cloud] 未找到 curl，跳过 S3 上传")
+            return
+
         cmd = [
-            "curl", "-f", "-s",
+            curl_path, "-f", "-s",
             "--aws-sigv4", f"aws:amz:{region}:s3",
             "--user", f"{access_key}:{secret_key}",
             "-X", "PUT",
@@ -279,7 +290,12 @@ class AudioStorage:
         uid = f"{random.randint(100000, 999999):06d}"
         filename = f"voice_{ts}_{uid}.wav"
 
-        cmd = ["curl", "-f", "-s", "-T", file_path]
+        curl_path = shutil.which("curl")
+        if not curl_path:
+            logger.warning("[tts_cloud] 未找到 curl，跳过 WebDAV 上传")
+            return
+
+        cmd = [curl_path, "-f", "-s", "-T", file_path]
         if username and password:
             cmd.extend(["-u", f"{username}:{password}"])
         cmd.append(f"{url.rstrip('/')}/{self._cloud_prefix()}/{filename}")

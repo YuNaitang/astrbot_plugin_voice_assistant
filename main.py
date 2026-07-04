@@ -362,12 +362,12 @@ class Main(Star):
         try:
             if final_audio and len(audio_paths) <= 1:
                 display_text = text if len(text) <= 200 else text[:200] + "..."
-                await self.context.send_by_session(
+                await self.context.send_message(
                     session, MessageChain([Plain(display_text), Record.fromFileSystem(final_audio)])
                 )
             elif audio_paths:
                 for i, (seg, ap) in enumerate(zip(segments, audio_paths)):
-                    await self.context.send_by_session(
+                    await self.context.send_message(
                         session, MessageChain([Plain(f"[{i+1}/{len(segments)}] {seg}"), Record.fromFileSystem(ap)])
                     )
             logger.info(f"[ai_speak] 备份发送完成: {session}")
