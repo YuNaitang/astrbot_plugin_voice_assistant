@@ -1,7 +1,8 @@
 """
 AI Voice Assistant — 本地音频归档
-==================================
+===================================
 包含初始化音频存储目录、文件持久化（move）、过期清理。
+每个归档 WAV 附带同名的 .txt 元数据文件。
 """
 import os
 import random
@@ -52,25 +53,54 @@ class LocalArchive:
 
     # ── 归档 ──────────────────────────────────────────────────
 
-    def save_file(self, audio_path: str) -> Optional[str]:
-        """将临时音频文件移到本地持久目录。返回持久化路径，失败返回 None。"""
+    def save_file(self, audio_path: str, text: str = "") -> Optional[str]:
+        """将临时音频文件移到本地持久目录，同时写入元数据 .txt。
+
+        Args:
+            audio_path: 临时 WAV 文件路径。
+            text: 语音对应的文本内容（可选），会写入同名的 .txt 侧车文件。
+
+        Returns:
+            持久化后的 WAV 文件路径，失败返回 None。
+        """
         if not self._enabled or not self._storage_dir:
             return None
         try:
             ts = datetime.now().strftime("%Y%m%d_%H%M%S")
             uid = random.randint(100000, 999999)
-            basename = f"voice_{ts}_{uid}.wav"
-            dest = os.path.join(self._storage_dir, basename)
+            basename = f"voice_{ts}_{uid}"
+            dest_wav = os.path.join(self._storage_dir, f"{basename}.wav")
             counter = 1
-            while os.path.exists(dest):
-                dest = os.path.join(
+            while os.path.exists(dest_wav):
+                dest_wav = os.path.join(
                     self._storage_dir,
-                    f"voice_{ts}_{uid}_{counter}.wav",
+                    f"{basename}_{counter}.wav",
                 )
                 counter += 1
-            shutil.move(audio_path, dest)
-            logger.info(f"[tts_storage] 已归档: {dest}")
-            return dest
+
+            # 移动音频文件
+            shutil.move(audio_path, dest_wav)
+            logger.info(f"[tts_storage] 已归档: {dest_wav}")
+
+            # 写入侧车元数据文件
+            dest_txt = dest_wav.rsplit(".", 1)[0] + ".txt"
+            meta_lines = [
+                f"File: {os.path.basename(dest_wav)}",
+                f"Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+                f"Size: {os.path.getsize(dest_wav)} bytes",
+            ]
+            if text:
+                # 写两行：一行原始内容，一行截断摘要（方便扫一眼）
+                meta_lines.append(f"Text: {text}")
+                meta_lines.append(f"TextPreview: {text[:200]}")
+            try:
+                with open(dest_txt, "w", encoding="utf-8") as f:
+                    f.write("\n".join(meta_lines) + "\n")
+                logger.info(f"[tts_storage] 已写入元数据: {dest_txt}")
+            except OSError as e:
+                logger.warning(f"[tts_storage] 写入元数据失败（非致命）: {e}")
+
+            return dest_wav
         except OSError as e:
             logger.warning(f"[tts_storage] 归档失败: {e}")
             raise ArchiveError(f"归档失败: {e}") from e

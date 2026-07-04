@@ -541,7 +541,7 @@ class TtsHandler:
         )
         if archivable:
             try:
-                archived = self.archive.save_file(archivable)
+                archived = self.archive.save_file(archivable, text)
                 if archived:
                     await self._cloud_backup(archived, text)
             except Exception as e:
@@ -549,7 +549,7 @@ class TtsHandler:
         elif len(audio_paths) > 1:
             for ap in audio_paths[1:]:
                 try:
-                    self.archive.save_file(ap)
+                    self.archive.save_file(ap, text)
                 except Exception as e:
                     logger.warning(f"[ai_speak] 归档失败: {e}")
 

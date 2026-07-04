@@ -622,7 +622,7 @@ class Main(Star):
             # 归档到本地存储（即使用户删除了临时文件也能追溯）
             archived_path = None
             try:
-                archived_path = self.tts.archive.save_file(audio_path)
+                archived_path = self.tts.archive.save_file(audio_path, text)
                 if archived_path:
                     # 同步触发云备份
                     await self.tts._cloud_backup(archived_path, text)
