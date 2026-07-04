@@ -618,6 +618,17 @@ class Main(Star):
             start = time.time()
             audio_path = await provider.get_audio(text)
             elapsed = time.time() - start
+
+            # 归档到本地存储（即使用户删除了临时文件也能追溯）
+            archived_path = None
+            try:
+                archived_path = self.tts.archive.save_file(audio_path)
+                if archived_path:
+                    # 同步触发云备份
+                    await self.tts._cloud_backup(archived_path, text)
+            except Exception as arc_e:
+                logger.warning(f"[test_tts] 归档失败（非致命）: {arc_e}")
+
             with open(audio_path, "rb") as f:
                 audio_b64 = base64.b64encode(f.read()).decode("utf-8")
             size = os.path.getsize(audio_path)
@@ -629,6 +640,7 @@ class Main(Star):
             logger.info(
                 f"[test_tts] 合成成功: text_len={len(text)} "
                 f"elapsed={elapsed:.1f}s size={size}B"
+                + (f" archived={archived_path}" if archived_path else "")
             )
             return jsonify({
                 "success": True,
