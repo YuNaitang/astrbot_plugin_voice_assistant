@@ -706,7 +706,44 @@ function base64ToBlob(base64, mime) {
 function bridgeAudioToUrl(bridgePromise) {
   return bridgePromise.then(function(res) {
     if (!res || !res.success) throw new Error((res && res.error) || "获取音频失败");
-    return URL.createObjectURL(base64ToBlob(res.data, res.mime));
+    if (!res.data || res.data.length < 100) throw new Error("音频数据为空或过短");
+    var blob = base64ToBlob(res.data, res.mime || "audio/wav");
+    var url = URL.createObjectURL(blob);
+    return url;
+  });
+}
+
+function playAudioBlob(blobUrl, audioEl, onEnd) {
+  audioEl.src = blobUrl;
+  audioEl.onerror = function() {
+    // blob URL 可能因 sandbox 失败，回退到 Web Audio API
+    console.warn("audio element blob URL failed, falling back to Web Audio API");
+    fallbackPlayAudio(blobUrl, audioEl, onEnd);
+  };
+  audioEl.oncanplay = function() {
+    audioEl.onerror = null;
+    audioEl.play();
+    if (onEnd) audioEl.onended = onEnd;
+  };
+}
+
+function fallbackPlayAudio(blobUrl, audioEl, onEnd) {
+  var ctx = new (window.AudioContext || window.webkitAudioContext)();
+  fetch(blobUrl).then(function(r) { return r.arrayBuffer(); }).then(function(buf) {
+    return ctx.decodeAudioData(buf);
+  }).then(function(buffer) {
+    var source = ctx.createBufferSource();
+    source.buffer = buffer;
+    source.connect(ctx.destination);
+    source.start(0);
+    // 显示播放状态
+    audioEl.src = "";
+    audioEl.controls = false;
+    if (onEnd) source.onended = onEnd;
+  }).catch(function(e) {
+    console.error("Web Audio fallback also failed:", e);
+    audioEl.controls = true;
+    audioEl.src = blobUrl;
   });
 }
 
@@ -1049,8 +1086,7 @@ function loadArchive() {
             $("archiveList").after(div);
             existing = $("archivePlayer");
           }
-          existing.querySelector("audio").src = blobUrl;
-          existing.querySelector("audio").play();
+          playAudioBlob(blobUrl, existing.querySelector("audio"));
         }).catch(function(e) {
           showStatus($("archiveStatus"), "音频加载失败: " + e.message, "error");
         });
@@ -1148,13 +1184,13 @@ $("testTtsBtn").addEventListener("click", function() {
       return;
     }
     bridgeAudioToUrl(Promise.resolve(res)).then(function(blobUrl) {
-      $("testAudio").src = blobUrl;
+      var audio = $("testAudio");
+      playAudioBlob(blobUrl, audio);
       $("testResult").style.display = "block";
       $("testMeta").textContent = "耗时 " + res.elapsed_seconds + " 秒 | " +
         (res.size_bytes < 1024 * 1024
           ? (res.size_bytes / 1024).toFixed(1) + " KB"
           : (res.size_bytes / 1024 / 1024).toFixed(1) + " MB");
-      $("testAudio").play();
 
       testHistory.unshift({
         text: text,
