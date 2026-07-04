@@ -530,6 +530,21 @@ audio { width: 100%; margin-top: 8px; }
       </div>
     </details>
 
+    <details class="config-group">
+      <summary>WebUI 面板</summary>
+      <div class="config-body">
+        <div class="checkbox-wrap">
+          <input type="checkbox" id="cfg_webui_enabled" />
+          <label for="cfg_webui_enabled">启用独立面板</label>
+        </div>
+        <div class="field">
+          <label>访问地址</label>
+          <input id="cfg_webui_url" readonly style="color:var(--blue);cursor:pointer;" onclick="this.select()" />
+          <div class="field-hint">在新标签页中打开此地址即可使用独立面板（不受 iframe 沙箱限制）</div>
+        </div>
+      </div>
+    </details>
+
     <div style="margin-top: 20px; display: flex; align-items: center; gap: 12px;">
       <button class="btn" id="saveConfigBtn">保存配置</button>
       <span id="configLoading" class="loading-text"></span>
@@ -739,7 +754,7 @@ var CONFIG_FIELDS = [
   "cloud_s3_access_key", "cloud_s3_secret_key", "cloud_s3_path_style",
   "cloud_webdav_url", "cloud_webdav_username", "cloud_webdav_password",
   "cloud_smb_share", "cloud_smb_username", "cloud_smb_password", "cloud_smb_domain",
-  "log_level", "send_text_with_voice", "backup_session_id",
+  "log_level", "send_text_with_voice", "backup_session_id", "webui_enabled",
 ];
 
 function loadSettings() {
@@ -761,6 +776,11 @@ function loadSettings() {
     // 云存储后端切换
     updateCloudFields();
     loadProviderOptions();
+    // 设置 WebUI 面板地址
+    var webuiUrl = $("cfg_webui_url");
+    if (webuiUrl) {
+      webuiUrl.value = window.location.origin + "/api/v1/plugins/extensions/astrbot_plugin_voice_assistant/panel";
+    }
   });
 }
 

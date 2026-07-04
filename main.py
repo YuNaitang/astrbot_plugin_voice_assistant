@@ -44,6 +44,7 @@ CONFIG_SAVE_ALLOWLIST = {
     "cloud_webdav_url", "cloud_webdav_username", "cloud_webdav_password",
     "cloud_smb_share", "cloud_smb_username", "cloud_smb_password", "cloud_smb_domain",
     "log_level", "send_text_with_voice", "backup_session_id",
+    "webui_enabled",
 }
 
 PLUGIN_CONFIG_PATH = os.path.normpath(os.path.join(
