@@ -14,17 +14,13 @@ from typing import Optional
 
 from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent
-from astrbot.api.provider import ProviderRequest
-from astrbot.core.message.components import Plain, Record
+from astrbot.core.message.components import File, Plain, Record
 from astrbot.core.message.message_event_result import MessageChain
 from astrbot.core.platform.message_type import MessageType
 from astrbot.core.platform.message_session import MessageSession as MessageSesion
 from astrbot.core.provider.provider import TTSProvider
 
 from ..errors import (
-    CloudUploadError,
-    CurlNotFoundError,
-    DensityLimitError,
     TTSProviderError,
     VoiceAssistantError,
 )
@@ -387,20 +383,31 @@ class TtsHandler:
         audio_paths: list[str],
         event: AstrMessageEvent,
     ):
-        backup = (self.config.get("backup_session_id") or "").strip()
-        if not backup:
-            return
+        """备用会话发送：将语音消息转发到指定会话（或默认发给 bot 自己）。
 
-        is_private = False
+        每条消息包含三要素：
+          1. 文件信息（文本描述 + 文件大小等元数据）
+          2. 语音消息（Record 组件）
+          3. 原始 WAV 文件（File 组件）
+        """
+        backup = (self.config.get("backup_session_id") or "").strip()
+
+        is_private = True  # 默认私聊发送
         if ":friend" in backup:
             backup = backup.replace(":friend", "").strip()
             is_private = True
         elif ":group" in backup:
             backup = backup.replace(":group", "").strip()
 
+        # 未配置则默认发给 bot 自己
         if not backup or not backup.isdigit():
-            logger.warning(f"[ai_speak] 备份发送: 无效的 QQ 号 '{backup}'，跳过")
-            return
+            self_id = event.get_self_id()
+            if not self_id:
+                logger.info("[ai_speak] 未配置备份会话且无法获取 bot 自身 ID，跳过")
+                return
+            backup = self_id
+            is_private = True
+            logger.info(f"[ai_speak] 备份发送到 bot 自身: {backup}")
 
         session = MessageSesion(
             event.session.platform_id,
@@ -412,22 +419,56 @@ class TtsHandler:
         try:
             if final_audio and len(audio_paths) <= 1:
                 display_text = text if len(text) <= 200 else text[:200] + "..."
+                size_str = self._format_file_size(final_audio)
+                info = (
+                    f"📁 语音备份\n"
+                    f"内容: {display_text}\n"
+                    f"文件: {os.path.basename(final_audio)}\n"
+                    f"大小: {size_str}"
+                )
                 await self.context.send_message(
                     session,
-                    MessageChain([Plain(display_text), Record.fromFileSystem(final_audio)]),
+                    MessageChain([
+                        Plain(info),
+                        Record.fromFileSystem(final_audio),
+                        File(name=os.path.basename(final_audio), file=final_audio),
+                    ]),
                 )
             elif audio_paths:
                 for i, (seg, ap) in enumerate(zip(segments, audio_paths)):
+                    display = seg if len(seg) <= 200 else seg[:200] + "..."
+                    size_str = self._format_file_size(ap)
+                    info = (
+                        f"📁 语音备份 段{i+1}/{len(segments)}\n"
+                        f"内容: {display}\n"
+                        f"文件: {os.path.basename(ap)}\n"
+                        f"大小: {size_str}"
+                    )
                     await self.context.send_message(
                         session,
                         MessageChain([
-                            Plain(f"[{i+1}/{len(segments)}] {seg}"),
+                            Plain(info),
                             Record.fromFileSystem(ap),
+                            File(name=os.path.basename(ap), file=ap),
                         ]),
                     )
             logger.info(f"[ai_speak] 备份发送完成: {session}")
         except Exception as e:
             logger.warning(f"[ai_speak] 备份发送失败 ({session}): {e}")
+
+    @staticmethod
+    def _format_file_size(file_path: str) -> str:
+        """格式化文件大小，返回可读字符串。"""
+        try:
+            size = os.path.getsize(file_path)
+            if size < 1024:
+                return f"{size} B"
+            elif size < 1024 * 1024:
+                return f"{size / 1024:.1f} KB"
+            else:
+                return f"{size / (1024 * 1024):.1f} MB"
+        except OSError:
+            return "未知"
 
     # ── 归档 + 云备份 ─────────────────────────────────────────
 

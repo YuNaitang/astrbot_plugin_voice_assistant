@@ -2,11 +2,11 @@
 
 ## 2.0.0
 - 重构: 模块化拆包 — 单文件 main.py (603行) + storage.py (410行) 拆分为 backend/ + storage/ 子包
-- 重构: 新增 errors.py — 8 个自定义异常类层次，精确捕获替换裸 `except Exception`
+- 重构: 新增 errors.py — 8 个自定义异常类层次，用精确捕获替换裸 `except Exception`
 - 重构: 云存储抽象 — `CloudProvider` ABC + Custom / S3 / WebDAV 三个独立 Provider 实现
 - 重构: 密度控制抽取 — `DensityController` 独立类替代 main.py 中散落的 6 个方法
 - 重构: `_find_curl()` 独立为 `storage/curl.py`，`LocalArchive` 独立为 `storage/local.py`
-- 修复: `permissions.py` 保留向后兼容的 re-export shim
+- 兼容: `permissions.py` 保留向后兼容的 re-export shim
 
 ## 1.5.3
 - 修复: curl 查找兜底 — `shutil.which` 失败时走 `command -v curl` 系统 shell 路径

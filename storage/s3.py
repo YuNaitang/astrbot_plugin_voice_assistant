@@ -11,7 +11,7 @@ from typing import Optional
 
 from astrbot.api import logger
 
-from ..errors import CloudUploadError, CurlNotFoundError
+from ..errors import CurlNotFoundError
 from .base import CloudProvider
 
 
