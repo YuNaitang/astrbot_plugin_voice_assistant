@@ -237,7 +237,7 @@
     "default": "",
     "hint": "[webdav] 基本认证用户名"
   },
-  "cloud_webdav_password": {
+  "cloud_webdav_passwd": {
     "description": "WebDAV·密码",
     "type": "string",
     "default": "",
@@ -255,7 +255,7 @@
     "default": "",
     "hint": "[smb] 访问共享的用户名"
   },
-  "cloud_smb_password": {
+  "cloud_smb_passwd": {
     "description": "SMB·密码",
     "type": "string",
     "default": "",
@@ -292,5 +292,11 @@
     "type": "bool",
     "default": true,
     "hint": "关闭后独立面板(/panel)将不可访问"
+  },
+  "webui_port": {
+    "description": "WebUI 面板端口",
+    "type": "int",
+    "default": 11180,
+    "hint": "独立管理面板的 HTTP 端口。修改后需重启插件生效"
   }
 }

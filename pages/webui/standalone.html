@@ -491,7 +491,7 @@ audio { width: 100%; margin-top: 8px; }
           <div class="field"><label>端点地址（Endpoint URL）</label><input id="cfg_cloud_webdav_url" /></div>
           <div class="two-col">
             <div class="field"><label>用户名</label><input id="cfg_cloud_webdav_username" /></div>
-            <div class="field"><label>密码</label><input id="cfg_cloud_webdav_password" type="password" /></div>
+            <div class="field"><label>密码</label><input id="cfg_cloud_webdav_passwd" type="password" /></div>
           </div>
         </div>
         <!-- SMB -->
@@ -499,7 +499,7 @@ audio { width: 100%; margin-top: 8px; }
           <div class="field"><label>共享路径（Share Path）</label><input id="cfg_cloud_smb_share" /></div>
           <div class="two-col">
             <div class="field"><label>用户名</label><input id="cfg_cloud_smb_username" /></div>
-            <div class="field"><label>密码</label><input id="cfg_cloud_smb_password" type="password" /></div>
+            <div class="field"><label>密码</label><input id="cfg_cloud_smb_passwd" type="password" /></div>
           </div>
           <div class="field"><label>域（Domain，可选）</label><input id="cfg_cloud_smb_domain" /></div>
         </div>
@@ -751,9 +751,9 @@ var CONFIG_FIELDS = [
   "cloud_custom_url", "cloud_custom_headers", "cloud_custom_body", "cloud_custom_result_path",
   "cloud_s3_endpoint", "cloud_s3_region", "cloud_s3_bucket",
   "cloud_s3_access_key", "cloud_s3_secret_key", "cloud_s3_path_style",
-  "cloud_webdav_url", "cloud_webdav_username", "cloud_webdav_password",
-  "cloud_smb_share", "cloud_smb_username", "cloud_smb_password", "cloud_smb_domain",
-  "log_level", "send_text_with_voice", "backup_session_id", "webui_enabled",
+  "cloud_webdav_url", "cloud_webdav_username", "cloud_webdav_passwd",
+  "cloud_smb_share", "cloud_smb_username", "cloud_smb_passwd", "cloud_smb_domain",
+  "log_level", "send_text_with_voice", "backup_session_id", "webui_enabled", "webui_port",
 ];
 
 function loadSettings() {

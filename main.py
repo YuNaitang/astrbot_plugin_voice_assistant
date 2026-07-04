@@ -6,6 +6,7 @@
 """
 import os
 import re
+from multiprocessing import Process
 
 from astrbot.api import logger
 from astrbot.api.event import filter, AstrMessageEvent
@@ -16,13 +17,14 @@ from astrbot.core.message.message_event_result import MessageChain
 
 from .backend.permissions import PERM_BASIC, PERM_LABELS, PERM_RESTRICTED, PERM_UNLIMITED
 from .backend.tts_handler import TtsHandler
+from .webui import run_server
 
 # ── WebUI 常量 ──────────────────────────────────────────────
 PLUGIN_NAME = "astrbot_plugin_voice_assistant"
 
 SENSITIVE_FIELDS = {
-    "cloud_s3_secret_key", "cloud_webdav_password",
-    "cloud_smb_password", "cloud_custom_headers",
+    "cloud_s3_secret_key", "cloud_webdav_passwd",
+    "cloud_smb_passwd", "cloud_custom_headers",
 }
 
 CONFIG_SAVE_ALLOWLIST = {
@@ -41,10 +43,10 @@ CONFIG_SAVE_ALLOWLIST = {
     "cloud_custom_result_path",
     "cloud_s3_endpoint", "cloud_s3_region", "cloud_s3_bucket",
     "cloud_s3_access_key", "cloud_s3_secret_key", "cloud_s3_path_style",
-    "cloud_webdav_url", "cloud_webdav_username", "cloud_webdav_password",
-    "cloud_smb_share", "cloud_smb_username", "cloud_smb_password", "cloud_smb_domain",
+    "cloud_webdav_url", "cloud_webdav_username", "cloud_webdav_passwd",
+    "cloud_smb_share", "cloud_smb_username", "cloud_smb_passwd", "cloud_smb_domain",
     "log_level", "send_text_with_voice", "backup_session_id",
-    "webui_enabled",
+    "webui_enabled", "webui_port",
 }
 
 PLUGIN_CONFIG_PATH = os.path.normpath(os.path.join(
@@ -60,7 +62,7 @@ NUMERIC_FIELDS = {
     "density_window_minutes", "density_max_count",
     "user_density_window_minutes", "user_density_threshold",
     "user_density_curve_steepness", "default_permission_level",
-    "local_audio_retention_days",
+    "local_audio_retention_days", "webui_port",
 }
 
 
@@ -74,6 +76,10 @@ class Main(Star):
         # TTS 编排处理器（持有所有子模块引用）
         self.tts = TtsHandler(context, self.config)
 
+        # 独立 WebUI 服务器
+        self._webui_process: Process | None = None
+        self._start_webui_server()
+
         self._register_webui()
 
         self._log_available_tts_providers()
@@ -83,10 +89,35 @@ class Main(Star):
             f"log_level={self.config.get('log_level', 'info')})"
         )
 
+    # ── 独立 WebUI 服务器 ──────────────────────────────────────────
+
+    def _start_webui_server(self):
+        """启动独立 WebUI 面板服务器（子进程）。"""
+        if not self.config.get("webui_enabled", True):
+            return
+        port = self.config.get("webui_port", 11180)
+        try:
+            self._webui_process = Process(target=run_server, args=(port,))
+            self._webui_process.start()
+            logger.info(f"聆音 WebUI 面板已启动: http://localhost:{port}")
+        except Exception as e:
+            logger.warning(f"聆音 WebUI 面板启动失败（非致命）: {e}")
+
+    def _stop_webui_server(self):
+        """停止独立 WebUI 服务器。"""
+        if self._webui_process and self._webui_process.is_alive():
+            try:
+                self._webui_process.terminate()
+                self._webui_process.join(timeout=5)
+            except Exception:
+                pass
+        self._webui_process = None
+
     # ── 生命周期 ───────────────────────────────────────────────
 
     async def terminate(self):
-        """插件卸载时清理临时音频文件。"""
+        """插件卸载时清理资源。"""
+        self._stop_webui_server()
         self.tts.cleanup_temp_files()
         logger.info("聆音 已卸载")
 

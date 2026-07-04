@@ -22,7 +22,7 @@ class WebDAVProvider(CloudProvider):
 
         url = (self.config.get("cloud_webdav_url") or "").strip()
         username = (self.config.get("cloud_webdav_username") or "").strip()
-        password = (self.config.get("cloud_webdav_password") or "").strip()
+        password = (self.config.get("cloud_webdav_passwd") or self.config.get("cloud_webdav_password") or "").strip()
 
         if not url:
             logger.warning("[tts_cloud] cloud_webdav_url 未配置，跳过")
