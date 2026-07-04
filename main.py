@@ -16,6 +16,35 @@ from astrbot.core.message.message_event_result import MessageChain
 from .backend.permissions import PERM_BASIC, PERM_LABELS, PERM_RESTRICTED, PERM_UNLIMITED
 from .backend.tts_handler import TtsHandler
 
+# ── WebUI 常量 ──────────────────────────────────────────────
+PLUGIN_NAME = "astrbot_plugin_voice_assistant"
+
+SENSITIVE_FIELDS = {
+    "cloud_s3_secret_key", "cloud_webdav_password",
+    "cloud_smb_password", "cloud_custom_headers",
+}
+
+CONFIG_SAVE_ALLOWLIST = {
+    "voice_enabled", "tts_provider_id", "tts_fallback_provider_id",
+    "min_text_length", "max_text_length", "tts_segment_max_chars",
+    "tts_inter_segment_delay", "tts_retry_max_attempts",
+    "tts_merge_enabled", "tts_merge_timeout_seconds",
+    "rate_limit_seconds", "density_window_minutes", "density_max_count",
+    "user_density_window_minutes", "user_density_threshold",
+    "user_density_curve_steepness",
+    "default_permission_level", "session_permissions",
+    "voice_prompt_extra",
+    "local_audio_dir", "local_audio_retention_days",
+    "cloud_backup_enabled", "cloud_backend",
+    "cloud_custom_url", "cloud_custom_headers", "cloud_custom_body",
+    "cloud_custom_result_path",
+    "cloud_s3_endpoint", "cloud_s3_region", "cloud_s3_bucket",
+    "cloud_s3_access_key", "cloud_s3_secret_key", "cloud_s3_path_style",
+    "cloud_webdav_url", "cloud_webdav_username", "cloud_webdav_password",
+    "cloud_smb_share", "cloud_smb_username", "cloud_smb_password", "cloud_smb_domain",
+    "log_level", "send_text_with_voice", "backup_session_id",
+}
+
 
 class Main(Star):
     """AI Voice Assistant — 让 AI 主动调用 TTS 回复语音"""
@@ -26,6 +55,8 @@ class Main(Star):
 
         # TTS 编排处理器（持有所有子模块引用）
         self.tts = TtsHandler(context, self.config)
+
+        self._register_webui()
 
         self._log_available_tts_providers()
         logger.info(
@@ -62,6 +93,46 @@ class Main(Star):
             except Exception:
                 logger.info(f"  · (无法获取元数据的 Provider: {type(p).__name__})")
         self._providers_logged = True
+
+    # ── WebUI 注册 ──────────────────────────────────────────────
+
+    def _register_webui(self):
+        """注册 WebUI API 端点到 AstrBot。"""
+        try:
+            prefix = f"/{PLUGIN_NAME}"
+            self.context.register_web_api(
+                f"{prefix}/get_config", self.handle_get_config, ["GET"], "读取配置"
+            )
+            self.context.register_web_api(
+                f"{prefix}/save_config", self.handle_save_config, ["POST"], "保存配置"
+            )
+            self.context.register_web_api(
+                f"{prefix}/get_status", self.handle_get_status, ["GET"], "运行时状态"
+            )
+            self.context.register_web_api(
+                f"{prefix}/get_permissions", self.handle_get_permissions, ["GET"], "权限列表"
+            )
+            self.context.register_web_api(
+                f"{prefix}/set_permission", self.handle_set_permission, ["POST"], "设置/删除权限"
+            )
+            self.context.register_web_api(
+                f"{prefix}/get_density_stats", self.handle_get_density_stats, ["GET"], "密度统计数据"
+            )
+            self.context.register_web_api(
+                f"{prefix}/get_archive_list", self.handle_get_archive_list, ["GET"], "归档文件列表"
+            )
+            self.context.register_web_api(
+                f"{prefix}/get_archive_file", self.handle_get_archive_file, ["GET"], "获取归档文件"
+            )
+            self.context.register_web_api(
+                f"{prefix}/delete_archive", self.handle_delete_archive, ["POST"], "删除归档文件"
+            )
+            self.context.register_web_api(
+                f"{prefix}/test_tts", self.handle_test_tts, ["POST"], "TTS 测试合成"
+            )
+            logger.info(f"AI Voice Assistant WebUI API 已注册（{prefix}）")
+        except Exception as e:
+            logger.warning(f"WebUI API 注册失败（非致命）: {e}")
 
     # ── LLM 请求注入（密度提醒 + extra prompt）──────────────────
 
@@ -224,3 +295,270 @@ class Main(Star):
             return
 
         await event.send(MessageChain([Plain(f"❌ 未知操作: {action}\n用法: /voice_perm set|get|list|del|help")]))
+
+    # ── WebUI Handlers ──────────────────────────────────────────
+
+    async def handle_get_config(self):
+        """读取完整配置，敏感字段脱敏。"""
+        from quart import jsonify
+        safe = {}
+        for k, v in self.config.items():
+            safe[k] = "***" if k in SENSITIVE_FIELDS else v
+        return jsonify({"success": True, "config": safe})
+
+    async def handle_save_config(self):
+        """保存配置（白名单过滤 → 更新 → 持久化）。"""
+        from quart import jsonify, request
+        try:
+            data = await request.get_json()
+            updates = data.get("config", {})
+            if not isinstance(updates, dict):
+                return jsonify({"success": False, "error": "格式错误"})
+            # 白名单过滤
+            safe = {k: v for k, v in updates.items() if k in CONFIG_SAVE_ALLOWLIST}
+            self.config.update(safe)
+            # 尝试持久化
+            self._persist_config()
+            return jsonify({"success": True})
+        except Exception as e:
+            return jsonify({"success": False, "error": str(e)})
+
+    def _persist_config(self):
+        """持久化配置到 JSON 文件。"""
+        import json as _json, os
+        try:
+            config_path = os.path.join(
+                os.path.dirname(os.path.abspath(__file__)),
+                "..", "..", "..", "data", "config",
+                "astrbot_plugin_voice_assistant.json",
+            )
+            config_path = os.path.normpath(config_path)
+            config_dir = os.path.dirname(config_path)
+            if os.path.exists(config_dir) or os.path.isdir(config_dir):
+                os.makedirs(config_dir, exist_ok=True)
+                with open(config_path, "w", encoding="utf-8") as f:
+                    _json.dump(self.config, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            logger.debug(f"[WebUI] 配置持久化失败（非致命）: {e}")
+
+    async def handle_get_status(self):
+        """运行时状态摘要。"""
+        from quart import jsonify
+        from datetime import datetime, timezone
+        # 今日调用次数
+        today = datetime.now(timezone.utc).date()
+        today_count = sum(
+            1 for r in getattr(self.tts, "_recent_calls", [])
+            if r.get("time", "").startswith(str(today))
+        )
+        # 活跃会话数
+        active_sessions = len(getattr(self.tts.density, "_voice_timeline", {}))
+        # 密度状态
+        is_limited = any(
+            self.tts.density.is_over_density_limit(sid)
+            for sid in getattr(self.tts.density, "_voice_timeline", {})
+        )
+        # 权限统计
+        perm_entries = self.config.get("session_permissions", []) or []
+        return jsonify({
+            "success": True,
+            "status": {
+                "voice_enabled": self.config.get("voice_enabled", True),
+                "provider_id": self.config.get("tts_provider_id", "") or "系统默认",
+                "today_count": today_count,
+                "density_limited": is_limited,
+                "active_sessions": active_sessions,
+                "default_permission_level": self.config.get("default_permission_level", 1),
+                "custom_permissions_count": len(perm_entries),
+                "recent_calls": list(reversed(getattr(self.tts, "_recent_calls", [])[-10:])),
+            },
+        })
+
+    async def handle_get_permissions(self):
+        """权限列表 + 默认等级。"""
+        from quart import jsonify
+        from .backend.permissions import PERM_LABELS
+        entries = self.config.get("session_permissions", []) or []
+        levels = []
+        for entry in entries:
+            entry = entry.strip()
+            if ":" in entry:
+                sid, lvl_str = entry.rsplit(":", 1)
+                try:
+                    lvl = int(lvl_str)
+                    levels.append({
+                        "session_id": sid,
+                        "level": lvl,
+                        "label": PERM_LABELS.get(lvl, f"未知({lvl})"),
+                    })
+                except ValueError:
+                    pass
+        return jsonify({
+            "success": True,
+            "permissions": {
+                "default_level": self.config.get("default_permission_level", 1),
+                "levels": levels,
+            },
+        })
+
+    async def handle_set_permission(self):
+        """添加或删除单条权限。"""
+        from quart import jsonify, request
+        try:
+            data = await request.get_json()
+            action = data.get("action", "")
+            session_id = data.get("session_id", "").strip()
+            if not session_id:
+                return jsonify({"success": False, "error": "缺少 session_id"})
+            if action == "set":
+                level = int(data.get("level", 1))
+                self.tts.perms.set_level(session_id, level)
+            elif action == "del":
+                self.tts.perms.remove_level(session_id)
+            else:
+                return jsonify({"success": False, "error": f"未知操作: {action}"})
+            return jsonify({"success": True})
+        except Exception as e:
+            return jsonify({"success": False, "error": str(e)})
+
+    async def handle_get_density_stats(self):
+        """实时密度统计数据。"""
+        from quart import jsonify
+        from datetime import datetime, timedelta
+        d = self.tts.density
+        # 会话级
+        session_stats = []
+        for sid, timeline in list(getattr(d, "_voice_timeline", {}).items()):
+            now = datetime.now()
+            window = self.config.get("density_window_minutes", 10)
+            cutoff = now - timedelta(minutes=window)
+            recent = [t for t in timeline if t > cutoff]
+            session_stats.append({
+                "session_id": sid[:20] + "..." if len(sid) > 20 else sid,
+                "count": len(recent),
+                "max": self.config.get("density_max_count", 3),
+                "window_minutes": window,
+            })
+        # 配置参数
+        return jsonify({
+            "success": True,
+            "stats": {
+                "sessions": session_stats,
+                "config": {
+                    "rate_limit_seconds": self.config.get("rate_limit_seconds", 5),
+                    "density_window_minutes": self.config.get("density_window_minutes", 10),
+                    "density_max_count": self.config.get("density_max_count", 3),
+                    "user_window_minutes": self.config.get("user_density_window_minutes", 60),
+                    "user_threshold": self.config.get("user_density_threshold", 5),
+                    "user_steepness": self.config.get("user_density_curve_steepness", 0.7),
+                },
+            },
+        })
+
+    async def handle_get_archive_list(self):
+        """归档文件列表。"""
+        from quart import jsonify
+        import os
+        from datetime import datetime
+        storage_dir = self.tts.archive._storage_dir
+        if not storage_dir or not os.path.isdir(storage_dir):
+            return jsonify({"success": True, "files": [], "path": "", "total": 0, "retention_days": 0})
+        files = []
+        for fname in sorted(os.listdir(storage_dir), reverse=True):
+            fpath = os.path.join(storage_dir, fname)
+            if not os.path.isfile(fpath):
+                continue
+            stat = os.stat(fpath)
+            files.append({
+                "name": fname,
+                "size_bytes": stat.st_size,
+                "mtime": datetime.fromtimestamp(stat.st_mtime).isoformat(),
+            })
+        return jsonify({
+            "success": True,
+            "files": files,
+            "path": storage_dir,
+            "total": len(files),
+            "retention_days": self.config.get("local_audio_retention_days", 7),
+        })
+
+    async def handle_get_archive_file(self):
+        """返回归档文件的 base64 数据和 MIME 类型。"""
+        from quart import jsonify, request
+        import base64, os
+        name = request.args.get("name", "")
+        if not name or ".." in name or "/" in name:
+            return jsonify({"success": False, "error": "无效文件名"})
+        storage_dir = self.tts.archive._storage_dir
+        if not storage_dir:
+            return jsonify({"success": False, "error": "归档目录未初始化"})
+        fpath = os.path.normpath(os.path.join(storage_dir, name))
+        if not fpath.startswith(os.path.normpath(storage_dir)):
+            return jsonify({"success": False, "error": "路径越界"})
+        if not os.path.isfile(fpath):
+            return jsonify({"success": False, "error": "文件不存在"})
+        with open(fpath, "rb") as f:
+            data = base64.b64encode(f.read()).decode("utf-8")
+        return jsonify({
+            "success": True,
+            "data": data,
+            "mime": "audio/wav",
+            "name": name,
+        })
+
+    async def handle_delete_archive(self):
+        """删除归档文件。"""
+        from quart import jsonify, request
+        import os
+        try:
+            data = await request.get_json()
+            name = data.get("name", "")
+            if not name or ".." in name or "/" in name:
+                return jsonify({"success": False, "error": "无效文件名"})
+            storage_dir = self.tts.archive._storage_dir
+            if not storage_dir:
+                return jsonify({"success": False, "error": "归档目录未初始化"})
+            fpath = os.path.normpath(os.path.join(storage_dir, name))
+            if not fpath.startswith(os.path.normpath(storage_dir)):
+                return jsonify({"success": False, "error": "路径越界"})
+            if os.path.isfile(fpath):
+                os.remove(fpath)
+            return jsonify({"success": True})
+        except Exception as e:
+            return jsonify({"success": False, "error": str(e)})
+
+    async def handle_test_tts(self):
+        """TTS 测试合成，返回音频 base64。"""
+        from quart import jsonify, request
+        import base64, asyncio, os, time
+        try:
+            data = await request.get_json()
+            text = (data.get("text") or "").strip()
+            if not text:
+                return jsonify({"success": False, "error": "请输入文本"})
+            provider_id = data.get("provider_id", "") or self.config.get("tts_provider_id", "")
+            provider = self.tts._resolve_provider(provider_id) if provider_id else None
+            if not provider:
+                provider = self.context.get_using_tts_provider(None)
+            if not provider:
+                return jsonify({"success": False, "error": "未找到可用的 TTS Provider"})
+            start = time.time()
+            audio_path = await provider.get_audio(text)
+            elapsed = time.time() - start
+            with open(audio_path, "rb") as f:
+                audio_b64 = base64.b64encode(f.read()).decode("utf-8")
+            size = os.path.getsize(audio_path)
+            # 清理临时文件
+            try:
+                os.remove(audio_path)
+            except OSError:
+                pass
+            return jsonify({
+                "success": True,
+                "data": audio_b64,
+                "mime": "audio/wav",
+                "elapsed_seconds": round(elapsed, 2),
+                "size_bytes": size,
+            })
+        except Exception as e:
+            return jsonify({"success": False, "error": str(e)})
