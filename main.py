@@ -4,6 +4,7 @@ AI Voice Assistant — AstrBot 通用 TTS 编排插件
 允许AI 通过工具自主调用 TTS 回复语音。
 支持多 Provider 降级、三级权限管理、双层密度控制、长文本分段合并。
 """
+import os
 import re
 
 from astrbot.api import logger
