@@ -81,14 +81,6 @@
         "labels": ["全部 — 强制整条回复转语音", "局部 — 仅转换标签段落", "语义 — AI自主决定"],
         "hint": "控制 LLM 回复中哪些内容转为语音"
       },
-      "send_generation_method": {
-        "description": "TTS 生成方法",
-        "type": "string",
-        "default": "llm_tag",
-        "options": ["llm_tag", "assistant_model", "llm_tool"],
-        "labels": ["标签 — 主LLM写标签触发", "辅助模型 — 辅助模型自行判断", "工具 — 主LLM调用ai_speak"],
-        "hint": "选择AI触发TTS的方式。切换后需重启"
-      },
       "send_tts_text_model": {
         "description": "TTS 文本模型",
         "type": "string",

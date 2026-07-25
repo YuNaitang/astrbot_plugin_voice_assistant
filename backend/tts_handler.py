@@ -147,6 +147,10 @@ class TtsHandler:
         if not text or len(text.strip()) < min_len:
             logger.debug(f"[ai_speak] 文本太短 ({len(text) if text else 0} chars)，跳过")
             return None
+        max_len = self._cfg("text_max_length", 500)
+        if max_len > 0 and len(text.strip()) > max_len:
+            logger.debug(f"[ai_speak] 文本超长 ({len(text)} > {max_len})，截断")
+            text = text.strip()[:max_len]
 
         # 3. 速率限制
         if perm_level == PERM_BASIC and self._check_rate_limit(session_id):

@@ -420,14 +420,6 @@ audio { width: 100%; margin-top: 8px; }
           </select>
         </div>
         <div class="field">
-          <label>TTS 生成方法</label>
-          <select id="cfg_send_generation_method">
-            <option value="llm_tag">标签 — 主 LLM 写 &lt;lingyin&gt; 标签触发</option>
-            <option value="assistant_model">辅助模型 — 辅助模型自行判断</option>
-            <option value="llm_tool">工具 — 主 LLM 调用 ai_speak 工具</option>
-          </select>
-        </div>
-        <div class="field">
           <label>TTS 文本模型</label>
           <select id="cfg_send_tts_text_model">
             <option value="">-- 使用主 LLM --</option>
@@ -944,7 +936,7 @@ var CONFIG_FIELDS = [
   "basic_voice_enabled", "basic_tts_provider_id", "basic_tts_fallback_id",
   "basic_tts_by_session", "basic_voice_routing", "basic_install_as_provider",
   "send_form", "send_language", "send_foreign_text_display",
-  "send_tts_scope", "send_generation_method", "send_tts_text_model",
+  "send_tts_scope", "send_tts_text_model",
   "send_tts_extra_prompt", "send_llm_behavior_inject",
   "trigger_group_probability",
   "trigger_private_probability", "trigger_force_probability",
@@ -981,7 +973,6 @@ var FIELD_TO_GROUP = {
   "send_language": "sending_effects",
   "send_foreign_text_display": "sending_effects",
   "send_tts_scope": "sending_effects",
-  "send_generation_method": "sending_effects",
   "send_tts_text_model": "sending_effects",
   "send_tts_extra_prompt": "sending_effects",
   "send_llm_behavior_inject": "sending_effects",

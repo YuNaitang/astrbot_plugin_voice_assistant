@@ -44,7 +44,7 @@ ALLOWED_GROUPS = {
     },
     "sending_effects": {
         "send_form", "send_language", "send_foreign_text_display",
-        "send_tts_scope", "send_generation_method", "send_tts_text_model",
+        "send_tts_scope", "send_tts_text_model",
         "send_tts_extra_prompt", "send_llm_behavior_inject",
     },
     "trigger_probability": {
@@ -602,9 +602,17 @@ class Main(Star):
             logger.debug(f"[聆音] TTS决策|跳过|空文本 umo={umo}")
             return
 
-        # 检查是否有 TTS 标签或 Token 保护的块
-        has_lingyin = "<lingyin>" in text.lower() or "<tts>" in text.lower()
-        has_tokens = "[[LINGYIN:" in text
+        # 语音转换范围 = all：强制包裹全文
+        tts_scope = self._c("send_tts_scope", "semantic")
+        if tts_scope == "all":
+            text = f"<lingyin>{text}</lingyin>"
+            has_lingyin = True
+            logger.info(f"[聆音] TTS决策|转换范围=全部|包裹全文 umo={umo}")
+        else:
+            # 检查是否有 TTS 标签或 Token 保护的块
+            has_lingyin = "<lingyin>" in text.lower() or "<tts>" in text.lower()
+            has_tokens = "[[LINGYIN:" in text
+
         if not has_lingyin and not has_tokens:
             # 强制概率模式：无标签时强制包裹 <lingyin>
             if self._c("trigger_force_probability", False):
@@ -615,6 +623,11 @@ class Main(Star):
                     text = f"<lingyin>{text}</lingyin>"
                     has_lingyin = True
                     logger.info(f"[聆音] TTS决策|强制概率|包裹全文为语音 umo={umo}")
+            # 自动语音转换：兜底包裹
+            if not has_lingyin and self._c("post_auto_convert", False):
+                text = f"<lingyin>{text}</lingyin>"
+                has_lingyin = True
+                logger.info(f"[聆音] TTS决策|自动转换|包裹全文为语音 umo={umo}")
             if not has_lingyin:
                 logger.debug(f"[聆音] TTS决策|跳过|无TTS标签 umo={umo}")
                 return  # 无标签，不处理

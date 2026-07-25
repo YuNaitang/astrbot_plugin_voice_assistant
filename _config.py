@@ -14,7 +14,6 @@ _CFG_MAP = {
     "send_language": ("sending_effects", "send_language"),
     "send_foreign_text_display": ("sending_effects", "send_foreign_text_display"),
     "send_tts_scope": ("sending_effects", "send_tts_scope"),
-    "send_generation_method": ("sending_effects", "send_generation_method"),
     "send_tts_text_model": ("sending_effects", "send_tts_text_model"),
     "send_tts_extra_prompt": ("sending_effects", "send_tts_extra_prompt"),
     "send_llm_behavior_inject": ("sending_effects", "send_llm_behavior_inject"),
