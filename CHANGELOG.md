@@ -1,6 +1,37 @@
 # Changelog
 
-## 2.1.1
+## 3.0.0
+- **重构: 缓存友好化** — 密度提醒移出 system prompt，语音规则模板固定注入，概率决策行化（15 字/次），缓存状态从 7 种降至 2 种
+- **重构: 文件拆分** — WebUI handlers 拆至 `api/handlers.py`；`backend/synthesizer.py` 纯函数提取；`_config.py` 共享映射表
+- **重构: 架构清理** — 删除 `storage/curl.py`、permissions.py shim、TtsPipeline 冗余参数、StubGateResult、死 import
+- **新增: 输入概率决策** — `on_llm_request` 阶段按群聊/私聊概率追加决策行，控制 AI 是否考虑语音
+- **新增: 强制概率模式** — 无标签时强制包裹 `<lingyin>` 转语音
+- **新增: 品牌命令 `/ly`** — 权限/引擎/概率/状态/开关/路由 6 子命令，`/voice_perm` 保留为别名
+- **新增: 标签兼容项** — 可添加自定义标签格式，自动归一化到 `<lingyin>`
+- **新增: TTS 文本模型** — 支持从系统 LLM Provider 列表选择独立后处理模型
+- **新增: 合并目标时长** — `text_merge_target_duration` 控制合并长度
+- **增强: 提供者自选防护** — 聆音不出现在 Provider 下拉列表
+- **增强: 概率体系重构** — 移除全局概率，群聊/私聊独立配置
+- **增强: 密度警告内存安全** — `_density_warned` 改为 dict，超限自动清理
+- **重构: 拟人化 TTS 行为系统** — 从单工具插件升级为完整 TTS 编排系统
+- **新增: TTSProvider 注册** — 聆音注册为 AstrBot 标准 `TTSProvider`（`lingyin_tts`），所有插件通过 `context.get_using_tts_provider()` 透明走聆音管线
+- **新增: 三层事件钩子管线**
+  - `on_llm_request` — 注入 AI 人格驱动的语音规则（无声硬概率）
+  - `on_llm_response` — 归一化 `<lingyin>/<tts>/<pc_tts>` 标签 + Token 保护 + 语言质量校验
+  - `on_decorating_result`(priority=-21000) — 发送前完整编排
+- **新增: 六大增强引擎**
+  - `sanitizer.py` — 文本清洗（移植 PC 规则集：emoji/颜文字/网络用语/去重/标点）
+  - `emotion.py` — 分层情感引擎（AI 自标 [tone:xxx] > Keyword 检测 > 韵律降级）
+  - `language.py` — 语言检测 + 质量校验 + LLM 翻译兜底
+  - `injector.py` — 精简 system prompt 注入（AI 人格驱动频率使用）
+  - `frequency.py` — AI 人格频率门控 + DensityController 对接
+  - `tag_parser.py` — 标签解析 + Token 保护 + 格式归一化
+- **新增: PC 共存桥接** — `bridge/pc_bridge.py` 三模式（auto/lingyin/pc）
+- **新增: Engine 接口契约** — `pipeline.py` 顶部定义所有引擎输入/输出签名
+- **新增: 单元测试** — 37 个测试覆盖 sanitizer/language/emotion 核心模块
+- **增强: ai_speak 防双重处理** — `_lingyin_voice_done` 标记
+- **增强: 可见文本管理** — 外语语音块后自动补中文可见文本
+- **增强: 多 TTS Provider 降级路由** — 首选 > 降级 > 系统默认 > 遍历 <li></li>
 - 修复: 密码字段 AstrBot WebUI 自动脱敏覆盖 — 改名 `_passwd` 避开关键词
 - 新增: 独立 WebUI 服务器 — `webui.py` (Quart + Hypercorn)，端口 `webui_port` 可配置（默认 11180）
 - 新增: 云存储全链路 Python 化 — S3(boto3) + Custom(aiohttp) + WebDAV(aiohttp)，移除 curl 依赖

@@ -4,7 +4,6 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>聆音</title>
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
 <style>
 /* Catppuccin Mocha */
 :root {
@@ -261,6 +260,22 @@ details.config-group .config-body .field:last-child {
 }
 
 /* -- audio 控件 -- */
+.error-banner {
+  padding: 12px 20px;
+  margin-bottom: 20px;
+  border-radius: 10px;
+  font-size: 0.85rem;
+  display: none;
+  align-items: center;
+  gap: 8px;
+}
+.error-banner.show { display: flex; }
+.error-banner.error { background: rgba(243,139,168,0.15); color: var(--red); border: 1px solid rgba(243,139,168,0.3); }
+.error-banner.success { background: rgba(166,227,161,0.15); color: var(--green); border: 1px solid rgba(166,227,161,0.3); }
+.error-banner.info { background: rgba(137,180,250,0.15); color: var(--blue); border: 1px solid rgba(137,180,250,0.3); }
+.error-banner .dismiss { margin-left: auto; cursor: pointer; opacity: 0.6; font-size: 1.1rem; line-height: 1; }
+.error-banner .dismiss:hover { opacity: 1; }
+
 audio { width: 100%; margin-top: 8px; }
 
 /* -- 归档表格 -- */
@@ -293,6 +308,7 @@ audio { width: 100%; margin-top: 8px; }
 </nav>
 
 <main class="main" id="mainContent">
+  <div id="errorBanner" class="error-banner"><span id="errorText"></span><span class="dismiss" onclick="closeErrorBanner()">&times;</span></div>
   <!-- -- 仪表盘 -- -->
   <div id="dashboardPage" class="content active">
     <h2 style="font-size:1.2rem; margin-bottom:24px;">仪表盘</h2>
@@ -319,212 +335,353 @@ audio { width: 100%; margin-top: 8px; }
     <h2 style="font-size:1.2rem; margin-bottom:24px;">配置管理</h2>
 
     <details class="config-group">
-      <summary>语音引擎</summary>
+      <summary>基本设置</summary>
       <div class="config-body">
         <div class="checkbox-wrap">
-          <input type="checkbox" id="cfg_voice_enabled" />
-          <label for="cfg_voice_enabled">启用语音回复</label>
+          <input type="checkbox" id="cfg_basic_voice_enabled" />
+          <label for="cfg_basic_voice_enabled">启用语音回复</label>
         </div>
         <div class="field">
-          <label>首选 TTS 引擎（TTS Provider）</label>
-          <select id="cfg_tts_provider_id">
+          <label>首选 TTS 引擎</label>
+          <select id="cfg_basic_tts_provider_id">
             <option value="">-- 系统默认 --</option>
           </select>
-          <div class="field-hint">在 AstrBot 已注册的 TTS Provider 中选择 ID。留空则使用系统全局默认</div>
+          <div class="field-hint">在 AstrBot 已注册的 TTS Provider 中选择</div>
         </div>
         <div class="field">
-          <label>备用 TTS 引擎（Fallback Provider）</label>
-          <select id="cfg_tts_fallback_provider_id">
+          <label>备用 TTS 引擎</label>
+          <select id="cfg_basic_tts_fallback_id">
             <option value="">-- 不使用降级 --</option>
           </select>
-          <div class="field-hint">首选不可用时自动切换到此处。留空则不启用降级</div>
+          <div class="field-hint">首选不可用时自动切换</div>
+        </div>
+        <div class="field">
+          <label>会话引擎指定</label>
+          <div id="cfg_basic_tts_by_session_list"></div>
+          <div style="display:flex;gap:8px;margin-top:8px;">
+            <input id="cfg_basic_tts_by_session_sid" placeholder="会话ID/群号" style="flex:1;" />
+            <select id="cfg_basic_tts_by_session_pid" style="width:160px;">
+              <option value="">选择引擎...</option>
+            </select>
+            <button class="btn btn-sm" id="sessionEngineAddBtn">添加</button>
+          </div>
+          <div class="field-hint">不同 QQ 群/私聊可指定不同 TTS 引擎。格式: 会话ID:引擎ID</div>
+        </div>
+        <div class="field">
+          <label>语音路由模式</label>
+          <select id="cfg_basic_voice_routing">
+            <option value="auto">智能 — 自动检测其他插件的 TTS 状态</option>
+            <option value="lingyin">聆音 — 接管全部语音</option>
+            <option value="other">其他 — 仅作 Provider，不开事件钩子</option>
+          </select>
+        </div>
+        <div class="checkbox-wrap">
+          <input type="checkbox" id="cfg_basic_install_as_provider" />
+          <label for="cfg_basic_install_as_provider">注册为系统 TTS Provider</label>
         </div>
       </div>
     </details>
 
     <details class="config-group">
-      <summary>文本分段</summary>
+      <summary>发送效果</summary>
+      <div class="config-body">
+        <div class="field">
+          <label>发送形态</label>
+          <select id="cfg_send_form">
+            <option value="voice_only">仅语音</option>
+            <option value="text_and_voice">语音+文字</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>目标语种</label>
+          <select id="cfg_send_language">
+            <option value="auto">自动</option>
+            <option value="zh">中文</option>
+            <option value="ja">日语</option>
+            <option value="en">英语</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>外语文字显示</label>
+          <select id="cfg_send_foreign_text_display">
+            <option value="foreign_only">仅外语原文</option>
+            <option value="translation_only">仅中文翻译</option>
+            <option value="foreign_first">外语原文 → 中文翻译</option>
+            <option value="translation_first">中文翻译 → 外语原文</option>
+          </select>
+          <div class="field-hint">非中文语音时，<lingyin> 标签外的可见文本排列方式</div>
+        </div>
+        <div class="field">
+          <label>语音转换范围</label>
+          <select id="cfg_send_tts_scope">
+            <option value="all">全部 — 强制整条回复转语音（忽略标签）</option>
+            <option value="partial">局部 — 仅转换有 &lt;lingyin&gt; 标签的段落</option>
+            <option value="semantic">语义 — AI 自主决定</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>TTS 生成方法</label>
+          <select id="cfg_send_generation_method">
+            <option value="llm_tag">标签 — 主 LLM 写 &lt;lingyin&gt; 标签触发</option>
+            <option value="assistant_model">辅助模型 — 辅助模型自行判断</option>
+            <option value="llm_tool">工具 — 主 LLM 调用 ai_speak 工具</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>TTS 文本模型</label>
+          <select id="cfg_send_tts_text_model">
+            <option value="">-- 使用主 LLM --</option>
+          </select>
+          <div class="field-hint">独立的 LLM 模型用于 TTS 文本后处理（清洗、翻译、格式调整）。留空则使用主 LLM</div>
+        </div>
+        <div class="field">
+          <label>TTS 补充提示词</label>
+          <textarea id="cfg_send_tts_extra_prompt" rows="3" placeholder="用温柔细腻的语气朗读，语速偏慢..."></textarea>
+          <div class="field-hint">影响 TTS 引擎合成风格，不是 LLM 提示词</div>
+        </div>
+        <div class="field">
+          <label>LLM 行为注入</label>
+          <textarea id="cfg_send_llm_behavior_inject" rows="3" placeholder="用可爱的语气说话..."></textarea>
+          <div class="field-hint">追加到系统提示词末尾的语音行为规则，影响 LLM 是否写语音标签</div>
+        </div>
+      </div>
+    </details>
+
+    <details class="config-group">
+      <summary>触发概率</summary>
       <div class="config-body">
         <div class="two-col">
           <div class="field">
-            <label>文本最短长度</label>
-            <input id="cfg_min_text_length" type="number" />
+            <label>群聊触发概率</label>
+            <input id="cfg_trigger_group_probability" type="range" min="0" max="1" step="0.05" />
+            <div style="display:flex;justify-content:space-between;font-size:0.75rem;color:var(--overlay0);">
+              <span>0.0</span><span id="cfg_trigger_group_probability_val">1.0</span><span>1.0</span>
+            </div>
+            <div class="field-hint">群聊中AI触发TTS的放行概率。1.0=总是放行</div>
+          </div>
+          <div class="field">
+            <label>私聊触发概率</label>
+            <input id="cfg_trigger_private_probability" type="range" min="0" max="1" step="0.05" />
+            <div style="display:flex;justify-content:space-between;font-size:0.75rem;color:var(--overlay0);">
+              <span>0.0</span><span id="cfg_trigger_private_probability_val">1.0</span><span>1.0</span>
+            </div>
+            <div class="field-hint">私聊中AI触发TTS的放行概率。1.0=总是放行</div>
+          </div>
+        </div>
+        <div class="checkbox-wrap">
+          <input type="checkbox" id="cfg_trigger_force_probability" />
+          <label for="cfg_trigger_force_probability">强制概率（无标签时强制转语音，按群聊/私聊各自的概率采样）</label>
+        </div>
+          </div>
+        </div>
+        <div style="border-top:1px solid var(--surface1);padding-top:16px;margin-top:8px;">
+          <div style="font-size:0.82rem;font-weight:500;color:var(--subtext0);margin-bottom:12px;">密度约束</div>
+          <div class="two-col">
+            <div class="field">
+              <label>会话密度窗口（分钟）</label>
+              <input id="cfg_trigger_density_window" type="number" />
+            </div>
+            <div class="field">
+              <label>窗口内最大次数</label>
+              <input id="cfg_trigger_density_max_count" type="number" />
+            </div>
+          </div>
+          <div class="two-col">
+            <div class="field">
+              <label>用户密度窗口（分钟）</label>
+              <input id="cfg_trigger_user_density_window" type="number" />
+            </div>
+            <div class="field">
+              <label>用户阈值</label>
+              <input id="cfg_trigger_user_threshold" type="number" />
+              <div class="field-hint">超过此次数后概率开始下降</div>
+            </div>
+          </div>
+          <div class="field">
+            <label>约束曲线强度</label>
+            <input id="cfg_trigger_curve_steepness" type="number" step="0.1" />
+            <div class="field-hint">值越大衰减越急剧。0 = 关闭。建议 0.3 ~ 1.5</div>
+          </div>
+        </div>
+        <div style="border-top:1px solid var(--surface1);padding-top:16px;margin-top:8px;">
+          <div style="font-size:0.82rem;font-weight:500;color:var(--subtext0);margin-bottom:12px;">触发间隔</div>
+          <div class="two-col">
+            <div class="field">
+              <label>会话触发间隔（秒）</label>
+              <input id="cfg_trigger_session_interval" type="number" />
+              <div class="field-hint">0 = 不限制</div>
+            </div>
+            <div class="field">
+              <label>用户触发间隔（秒）</label>
+              <input id="cfg_trigger_user_interval" type="number" />
+              <div class="field-hint">0 = 不限制</div>
+            </div>
+          </div>
+        </div>
+        <div style="border-top:1px solid var(--surface1);padding-top:16px;margin-top:8px;">
+          <div style="font-size:0.82rem;font-weight:500;color:var(--subtext0);margin-bottom:12px;">权限管理</div>
+          <div class="field">
+            <label>默认权限等级</label>
+            <select id="cfg_trigger_default_permission">
+              <option value="0">0 · 无限制 — 不检查速率和密度</option>
+              <option value="1" selected>1 · 基准限制 — 受速率和密度控制</option>
+              <option value="2">2 · 完全限制 — 禁止语音</option>
+            </select>
+            <div class="field-hint">新会话使用此等级。管理员私聊始终为无限制</div>
+          </div>
+        </div>
+      </div>
+    </details>
+
+    <details class="config-group">
+      <summary>文本处理</summary>
+      <div class="config-body">
+        <div class="two-col">
+          <div class="field">
+            <label>最短文本长度</label>
+            <input id="cfg_text_min_length" type="number" />
             <div class="field-hint">短于此值不合成语音。建议 2 ~ 10</div>
           </div>
           <div class="field">
             <label>每段最大字符数</label>
-            <input id="cfg_tts_segment_max_chars" type="number" />
+            <input id="cfg_text_segment_max_chars" type="number" />
             <div class="field-hint">建议 60 ~ 120，越小越自然但段数越多</div>
           </div>
         </div>
         <div class="two-col">
           <div class="field">
             <label>段间间隔（秒）</label>
-            <input id="cfg_tts_inter_segment_delay" type="number" step="0.1" />
+            <input id="cfg_text_segment_delay" type="number" step="0.1" />
             <div class="field-hint">避免 TTS API 限流。建议 0.2 ~ 1.0</div>
           </div>
           <div class="field">
             <label>重试次数</label>
-            <input id="cfg_tts_retry_max_attempts" type="number" />
-            <div class="field-hint">某段合成失败时最多重试 N 次。0 = 不重试</div>
+            <input id="cfg_text_retry_max_attempts" type="number" />
+            <div class="field-hint">0 = 不重试</div>
+          </div>
+        </div>
+        <div class="two-col">
+          <div class="field">
+            <label>文本上限</label>
+            <input id="cfg_text_max_length" type="number" />
+            <div class="field-hint">仅作参考。超长文本自动分段。</div>
+          </div>
+          <div class="field">
+            <label>合并超时（秒）</label>
+            <input id="cfg_text_merge_timeout" type="number" />
           </div>
         </div>
         <div class="checkbox-wrap">
-          <input type="checkbox" id="cfg_tts_merge_enabled" />
-          <label for="cfg_tts_merge_enabled">合并多段语音（需 pydub / ffmpeg）</label>
+          <input type="checkbox" id="cfg_text_merge_enabled" />
+          <label for="cfg_text_merge_enabled">合并多段语音（需 pydub / ffmpeg）</label>
         </div>
         <div class="field">
-          <label>合并超时（秒）</label>
-          <input id="cfg_tts_merge_timeout_seconds" type="number" />
-          <div class="field-hint">开启合并时最多等待 N 秒，超时自动降级为分段发送</div>
+          <label>合并目标时长（秒）</label>
+          <input id="cfg_text_merge_target_duration" type="number" />
+          <div class="field-hint">超过此值停止追加更多段</div>
         </div>
       </div>
     </details>
 
     <details class="config-group">
-      <summary>频率控制</summary>
-      <div class="config-body">
-        <div class="two-col">
-          <div class="field">
-            <label>调用间隔（秒）</label>
-            <input id="cfg_rate_limit_seconds" type="number" />
-            <div class="field-hint">同一会话两次语音至少相隔 N 秒。0 = 不限制</div>
-          </div>
-          <div class="field">
-            <label>密度统计窗口（分钟）</label>
-            <input id="cfg_density_window_minutes" type="number" />
-          </div>
-        </div>
-        <div class="two-col">
-          <div class="field">
-            <label>窗口内最大次数</label>
-            <input id="cfg_density_max_count" type="number" />
-          </div>
-          <div class="field">
-            <label>用户密度窗口（分钟）</label>
-            <input id="cfg_user_density_window_minutes" type="number" />
-          </div>
-        </div>
-        <div class="two-col">
-          <div class="field">
-            <label>用户阈值</label>
-            <input id="cfg_user_density_threshold" type="number" />
-            <div class="field-hint">超过此次数后概率开始下降（Logistic 曲线）</div>
-          </div>
-          <div class="field">
-            <label>衰减陡峭度</label>
-            <input id="cfg_user_density_curve_steepness" type="number" step="0.1" />
-            <div class="field-hint">值越大衰减越急剧。0 = 关闭用户级概率降权。建议 0.3 ~ 1.5</div>
-          </div>
-        </div>
-      </div>
-    </details>
-
-    <details class="config-group">
-      <summary>LLM 行为</summary>
+      <summary>后处理</summary>
       <div class="config-body">
         <div class="field">
-          <label>语音行为规则（Voice Prompt Extra）</label>
-          <textarea id="cfg_voice_prompt_extra" rows="3" placeholder="例如：用可爱的语气说话"></textarea>
-          <div class="field-hint">追加到系统提示词中的语音行为规则</div>
+          <label>标签兼容</label>
+          <div style="font-size:0.82rem;color:var(--overlay0);padding:8px 12px;background:var(--surface0);border-radius:8px;">
+            当前支持: &lt;lingyin&gt; &lt;tts&gt; &lt;pc_tts&gt;
+          </div>
         </div>
-      </div>
-    </details>
-
-    <details class="config-group">
-      <summary>本地存档</summary>
-      <div class="config-body">
-        <div class="field">
-          <label>音频存档目录</label>
-          <input id="cfg_local_audio_dir" placeholder="留空使用默认路径" />
-          <div class="field-hint">TTS 生成的音频文件会复制一份到该目录持久保留</div>
-        </div>
-        <div class="field">
-          <label>存档保留天数</label>
-          <input id="cfg_local_audio_retention_days" type="number" />
-          <div class="field-hint">超过 N 天的音频文件会被自动清理。设为 0 则永不清除</div>
-        </div>
-      </div>
-    </details>
-
-    <details class="config-group">
-      <summary>云存储</summary>
-      <div class="config-body">
         <div class="checkbox-wrap">
-          <input type="checkbox" id="cfg_cloud_backup_enabled" />
-          <label for="cfg_cloud_backup_enabled">启用云存储备份</label>
+          <input type="checkbox" id="cfg_post_auto_convert" />
+          <label for="cfg_post_auto_convert">自动语音转换（模型没写标签时的兜底）</label>
         </div>
+      </div>
+    </details>
+
+    <details class="config-group">
+      <summary>备份设置</summary>
+      <div class="config-body">
         <div class="field">
-          <label>云存储后端类型（Backend）</label>
-          <select id="cfg_cloud_backend">
-            <option value="custom">自定义 API（Custom API）</option>
-            <option value="s3">S3 兼容（S3）</option>
-            <option value="webdav">WebDAV</option>
-            <option value="smb">SMB 共享（SMB）</option>
-          </select>
+          <label>备份群聊</label>
+          <input id="cfg_backup_chat_id" placeholder="纯数字群号，留空=发给自己" />
         </div>
-        <!-- Custom API -->
-        <div class="cloud-fields" data-backend="custom">
-          <div class="field"><label>请求地址（Endpoint URL）</label><input id="cfg_cloud_custom_url" /></div>
-          <div class="field"><label>请求头（Headers，每行 Key: Value）</label><textarea id="cfg_cloud_custom_headers" rows="2"></textarea></div>
-          <div class="field"><label>附加请求体（Extra Body，JSON）</label><textarea id="cfg_cloud_custom_body" rows="2"></textarea></div>
-          <div class="field"><label>返回 URL 路径（Result Path，点语法）</label><input id="cfg_cloud_custom_result_path" /></div>
-        </div>
-        <!-- S3 -->
-        <div class="cloud-fields" data-backend="s3" style="display:none">
-          <div class="field"><label>端点地址（Endpoint）</label><input id="cfg_cloud_s3_endpoint" /></div>
-          <div class="two-col">
-            <div class="field"><label>区域（Region）</label><input id="cfg_cloud_s3_region" /></div>
-            <div class="field"><label>存储桶（Bucket）</label><input id="cfg_cloud_s3_bucket" /></div>
-          </div>
-          <div class="two-col">
-            <div class="field"><label>Access Key</label><input id="cfg_cloud_s3_access_key" /></div>
-            <div class="field"><label>Secret Key</label><input id="cfg_cloud_s3_secret_key" type="password" /></div>
-          </div>
+        <div style="border-top:1px solid var(--surface1);padding-top:16px;margin-top:8px;">
+          <div style="font-size:0.82rem;font-weight:500;color:var(--subtext0);margin-bottom:12px;">本地归档</div>
           <div class="checkbox-wrap">
-            <input type="checkbox" id="cfg_cloud_s3_path_style" />
-            <label for="cfg_cloud_s3_path_style">路径风格（Path Style）</label>
+            <input type="checkbox" id="cfg_backup_local_enabled" />
+            <label for="cfg_backup_local_enabled">启用本地音频归档</label>
           </div>
-        </div>
-        <!-- WebDAV -->
-        <div class="cloud-fields" data-backend="webdav" style="display:none">
-          <div class="field"><label>端点地址（Endpoint URL）</label><input id="cfg_cloud_webdav_url" /></div>
           <div class="two-col">
-            <div class="field"><label>用户名</label><input id="cfg_cloud_webdav_username" /></div>
-            <div class="field"><label>密码</label><input id="cfg_cloud_webdav_passwd" type="password" /></div>
+            <div class="field">
+              <label>存档目录</label>
+              <input id="cfg_backup_local_dir" placeholder="留空使用默认路径" />
+            </div>
+            <div class="field">
+              <label>保留天数</label>
+              <input id="cfg_backup_local_retention_days" type="number" />
+              <div class="field-hint">0 = 永不清除</div>
+            </div>
           </div>
         </div>
-        <!-- SMB -->
-        <div class="cloud-fields" data-backend="smb" style="display:none">
-          <div class="field"><label>共享路径（Share Path）</label><input id="cfg_cloud_smb_share" /></div>
-          <div class="two-col">
-            <div class="field"><label>用户名</label><input id="cfg_cloud_smb_username" /></div>
-            <div class="field"><label>密码</label><input id="cfg_cloud_smb_passwd" type="password" /></div>
+        <div style="border-top:1px solid var(--surface1);padding-top:16px;margin-top:8px;">
+          <div style="font-size:0.82rem;font-weight:500;color:var(--subtext0);margin-bottom:12px;">云端备份</div>
+          <div class="checkbox-wrap">
+            <input type="checkbox" id="cfg_backup_cloud_enabled" />
+            <label for="cfg_backup_cloud_enabled">启用云存储备份</label>
           </div>
-          <div class="field"><label>域（Domain，可选）</label><input id="cfg_cloud_smb_domain" /></div>
-        </div>
-      </div>
-    </details>
-
-    <details class="config-group">
-      <summary>其他</summary>
-      <div class="config-body">
-        <div class="two-col">
           <div class="field">
-            <label>日志级别</label>
-            <select id="cfg_log_level">
-              <option value="info">INFO</option>
-              <option value="debug">DEBUG</option>
+            <label>后端类型</label>
+            <select id="cfg_backup_cloud_backend">
+              <option value="custom">自定义 API</option>
+              <option value="s3">S3 兼容</option>
+              <option value="webdav">WebDAV</option>
             </select>
           </div>
-          <div class="field">
-            <label>备份转发 QQ</label>
-            <input id="cfg_backup_session_id" placeholder="纯数字群号，留空不转发" />
+          <!-- Custom API -->
+          <div class="cloud-fields" data-backend="custom">
+            <div class="field"><label>请求地址</label><input id="cfg_cloud_custom_url" /></div>
+            <div class="field"><label>请求头（每行 Key: Value）</label><textarea id="cfg_cloud_custom_headers" rows="2"></textarea></div>
+            <div class="field"><label>附加请求体（JSON）</label><textarea id="cfg_cloud_custom_body" rows="2"></textarea></div>
+            <div class="field"><label>返回 URL 路径（点语法）</label><input id="cfg_cloud_custom_result_path" /></div>
+          </div>
+          <!-- S3 -->
+          <div class="cloud-fields" data-backend="s3" style="display:none">
+            <div class="field"><label>端点地址</label><input id="cfg_cloud_s3_endpoint" /></div>
+            <div class="two-col">
+              <div class="field"><label>区域</label><input id="cfg_cloud_s3_region" /></div>
+              <div class="field"><label>存储桶</label><input id="cfg_cloud_s3_bucket" /></div>
+            </div>
+            <div class="two-col">
+              <div class="field"><label>Access Key</label><input id="cfg_cloud_s3_access_key" /></div>
+              <div class="field"><label>Secret Key</label><input id="cfg_cloud_s3_secret_key" type="password" /></div>
+            </div>
+            <div class="checkbox-wrap">
+              <input type="checkbox" id="cfg_cloud_s3_path_style" />
+              <label>路径风格（Path Style）</label>
+            </div>
+          </div>
+          <!-- WebDAV -->
+          <div class="cloud-fields" data-backend="webdav" style="display:none">
+            <div class="field"><label>端点地址</label><input id="cfg_cloud_webdav_url" /></div>
+            <div class="two-col">
+              <div class="field"><label>用户名</label><input id="cfg_cloud_webdav_username" /></div>
+              <div class="field"><label>密码</label><input id="cfg_cloud_webdav_passwd" type="password" /></div>
+            </div>
           </div>
         </div>
-        <div class="checkbox-wrap">
-          <input type="checkbox" id="cfg_send_text_with_voice" />
-          <label for="cfg_send_text_with_voice">同时发送文字</label>
+      </div>
+    </details>
+
+    <details class="config-group">
+      <summary>杂项</summary>
+      <div class="config-body">
+        <div class="field">
+          <label>日志级别</label>
+          <select id="cfg_log_level">
+            <option value="info">INFO</option>
+            <option value="debug">DEBUG</option>
+          </select>
         </div>
       </div>
     </details>
@@ -534,12 +691,22 @@ audio { width: 100%; margin-top: 8px; }
       <div class="config-body">
         <div class="checkbox-wrap">
           <input type="checkbox" id="cfg_webui_enabled" />
-          <label for="cfg_webui_enabled">启用独立面板</label>
+          <label>启用独立面板</label>
         </div>
         <div class="field">
           <label>访问地址</label>
           <input id="cfg_webui_url" readonly style="color:var(--blue);cursor:pointer;" onclick="this.select()" />
-          <div class="field-hint">在新标签页中打开此地址即可使用独立面板（不受 iframe 沙箱限制）</div>
+          <div class="field-hint">在新标签页中打开此地址即可使用独立面板</div>
+        </div>
+        <div class="two-col">
+          <div class="field">
+            <label>端口</label>
+            <input id="cfg_webui_port" type="number" />
+          </div>
+          <div class="field">
+            <label>AstrBot 服务地址</label>
+            <input id="cfg_astrbot_server_url" />
+          </div>
         </div>
       </div>
     </details>
@@ -657,7 +824,10 @@ function apiGet(endpoint, params) {
   if (params) {
     url += "?" + Object.keys(params).map(function(k) { return encodeURIComponent(k) + "=" + encodeURIComponent(params[k]); }).join("&");
   }
-  return fetch(url, { credentials: "include" }).then(function(r) { return r.json(); });
+  return fetch(url, { credentials: "include" }).then(function(r) { return r.json(); }).catch(function(err) {
+    showError("网络连接失败，请确认 AstrBot 服务正在运行: " + err.message);
+    return { success: false, error: err.message };
+  });
 }
 
 function apiPost(endpoint, body) {
@@ -666,7 +836,10 @@ function apiPost(endpoint, body) {
     headers: { "Content-Type": "application/json" },
     credentials: "include",
     body: JSON.stringify(body || {}),
-  }).then(function(r) { return r.json(); });
+  }).then(function(r) { return r.json(); }).catch(function(err) {
+    showError("网络连接失败，请确认 AstrBot 服务正在运行: " + err.message);
+    return { success: false, error: err.message };
+  });
 }
 
 function $(id) { return document.getElementById(id); }
@@ -679,6 +852,33 @@ function showStatus(el, msg, type) {
   el.textContent = msg;
   el.className = "status show " + type;
   setTimeout(function() { el.classList.remove("show"); }, 3000);
+}
+
+function showError(msg) {
+  $("errorText").textContent = msg;
+  $("errorBanner").className = "error-banner show error";
+}
+
+function clearError() {
+  $("errorBanner").className = "error-banner";
+}
+
+function closeErrorBanner() {
+  clearError();
+}
+
+var _chartJsLoaded = false;
+var _chartJsQueue = [];
+function loadChartJs(callback) {
+  if (typeof Chart !== "undefined") { if (callback) callback(); return; }
+  if (callback) _chartJsQueue.push(callback);
+  if (_chartJsLoaded) return;
+  _chartJsLoaded = true;
+  var s = document.createElement("script");
+  s.src = "https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js";
+  s.onload = function() { _chartJsQueue.forEach(function(f) { try { f(); } catch(e) {} }); _chartJsQueue = []; };
+  s.onerror = function() { _chartJsLoaded = false; showError("图表库加载失败，统计图表不可用"); _chartJsQueue = []; };
+  document.body.appendChild(s);
 }
 
 // -- 导航切换 --
@@ -702,7 +902,8 @@ document.querySelector(".sidebar").addEventListener("click", function(e) {
 // ============================================================
 function loadDashboard() {
   apiGet("get_status").then(function(res) {
-    if (!res.success) return;
+    if (!res.success) { showError(res.error || "加载仪表盘失败"); return; }
+    clearError();
     var s = res.status;
     $("statVoice").textContent = s.voice_enabled ? "已开启" : "已关闭";
     $("statVoice").style.color = s.voice_enabled ? "var(--green)" : "var(--red)";
@@ -740,34 +941,118 @@ function loadDashboard() {
 // 配置管理
 // ============================================================
 var CONFIG_FIELDS = [
-  "voice_enabled", "tts_provider_id", "tts_fallback_provider_id",
-  "min_text_length", "tts_segment_max_chars", "tts_inter_segment_delay",
-  "tts_retry_max_attempts", "tts_merge_enabled", "tts_merge_timeout_seconds",
-  "rate_limit_seconds", "density_window_minutes", "density_max_count",
-  "user_density_window_minutes", "user_density_threshold", "user_density_curve_steepness",
-  "voice_prompt_extra",
-  "local_audio_dir", "local_audio_retention_days",
-  "cloud_backup_enabled", "cloud_backend",
+  "basic_voice_enabled", "basic_tts_provider_id", "basic_tts_fallback_id",
+  "basic_tts_by_session", "basic_voice_routing", "basic_install_as_provider",
+  "send_form", "send_language", "send_foreign_text_display",
+  "send_tts_scope", "send_generation_method", "send_tts_text_model",
+  "send_tts_extra_prompt", "send_llm_behavior_inject",
+  "trigger_group_probability",
+  "trigger_private_probability", "trigger_force_probability",
+  "trigger_density_window", "trigger_density_max_count",
+  "trigger_user_density_window", "trigger_user_threshold",
+  "trigger_curve_steepness", "trigger_session_interval",
+  "trigger_user_interval",
+  "trigger_default_permission", "trigger_session_overrides",
+  "text_min_length", "text_max_length", "text_segment_max_chars",
+  "text_segment_delay", "text_retry_max_attempts",
+  "text_merge_enabled", "text_merge_target_duration", "text_merge_timeout",
+  "post_auto_convert",
+  "backup_chat_id", "backup_local_enabled",
+  "backup_local_dir", "backup_local_retention_days",
+  "backup_cloud_enabled", "backup_cloud_backend",
   "cloud_custom_url", "cloud_custom_headers", "cloud_custom_body", "cloud_custom_result_path",
   "cloud_s3_endpoint", "cloud_s3_region", "cloud_s3_bucket",
   "cloud_s3_access_key", "cloud_s3_secret_key", "cloud_s3_path_style",
   "cloud_webdav_url", "cloud_webdav_username", "cloud_webdav_passwd",
   "cloud_smb_share", "cloud_smb_username", "cloud_smb_passwd", "cloud_smb_domain",
-  "log_level", "send_text_with_voice", "backup_session_id", "webui_enabled", "webui_port",
+  "log_level", "webui_enabled", "webui_port",
+  "astrbot_server_url",
 ];
+
+// 扁平键 → 配置组映射（GET 读取用）
+var FIELD_TO_GROUP = {
+  "basic_voice_enabled": "basic_settings",
+  "basic_tts_provider_id": "basic_settings",
+  "basic_tts_fallback_id": "basic_settings",
+  "basic_tts_by_session": "basic_settings",
+  "basic_voice_routing": "basic_settings",
+  "basic_install_as_provider": "basic_settings",
+  "send_form": "sending_effects",
+  "send_language": "sending_effects",
+  "send_foreign_text_display": "sending_effects",
+  "send_tts_scope": "sending_effects",
+  "send_generation_method": "sending_effects",
+  "send_tts_text_model": "sending_effects",
+  "send_tts_extra_prompt": "sending_effects",
+  "send_llm_behavior_inject": "sending_effects",
+  "trigger_group_probability": "trigger_probability",
+  "trigger_private_probability": "trigger_probability",
+  "trigger_force_probability": "trigger_probability",
+  "trigger_density_window": "trigger_probability",
+  "trigger_density_max_count": "trigger_probability",
+  "trigger_user_density_window": "trigger_probability",
+  "trigger_user_threshold": "trigger_probability",
+  "trigger_curve_steepness": "trigger_probability",
+  "trigger_session_interval": "trigger_probability",
+  "trigger_user_interval": "trigger_probability",
+  "trigger_default_permission": "trigger_probability",
+  "trigger_session_overrides": "trigger_probability",
+  "text_min_length": "text_processing",
+  "text_max_length": "text_processing",
+  "text_segment_max_chars": "text_processing",
+  "text_segment_delay": "text_processing",
+  "text_retry_max_attempts": "text_processing",
+  "text_merge_enabled": "text_processing",
+  "text_merge_target_duration": "text_processing",
+  "text_merge_timeout": "text_processing",
+  "post_auto_convert": "post_processing",
+  "backup_chat_id": "backup_settings",
+  "backup_local_enabled": "backup_settings",
+  "backup_local_dir": "backup_settings",
+  "backup_local_retention_days": "backup_settings",
+  "backup_cloud_enabled": "backup_settings",
+  "backup_cloud_backend": "backup_settings",
+  "cloud_custom_url": "cloud_storage",
+  "cloud_custom_headers": "cloud_storage",
+  "cloud_custom_body": "cloud_storage",
+  "cloud_custom_result_path": "cloud_storage",
+  "cloud_s3_endpoint": "cloud_storage",
+  "cloud_s3_region": "cloud_storage",
+  "cloud_s3_bucket": "cloud_storage",
+  "cloud_s3_access_key": "cloud_storage",
+  "cloud_s3_secret_key": "cloud_storage",
+  "cloud_s3_path_style": "cloud_storage",
+  "cloud_webdav_url": "cloud_storage",
+  "cloud_webdav_username": "cloud_storage",
+  "cloud_webdav_passwd": "cloud_storage",
+  "cloud_smb_share": "cloud_storage",
+  "cloud_smb_username": "cloud_storage",
+  "cloud_smb_passwd": "cloud_storage",
+  "cloud_smb_domain": "cloud_storage",
+  "log_level": "misc_settings",
+  "webui_enabled": "misc_settings",
+  "webui_port": "misc_settings",
+  "astrbot_server_url": "misc_settings",
+};
 
 function loadSettings() {
   apiGet("get_config").then(function(res) {
-    if (!res.success) return;
+    if (!res.success) { showError(res.error || "加载配置失败"); return; }
+    clearError();
     var cfg = res.config || {};
     CONFIG_FIELDS.forEach(function(key) {
       var el = $("cfg_" + key);
       if (!el) return;
-      var val = cfg[key];
+      var group = FIELD_TO_GROUP[key];
+      var val = group ? (cfg[group] || {})[key] : undefined;
       if (el.type === "checkbox") {
         el.checked = val === true || val === "true";
       } else if (el.tagName === "SELECT") {
         el.value = val != null ? String(val) : "";
+      } else if (el.type === "range") {
+        el.value = val != null ? String(val) : "1.0";
+        var valEl = $("cfg_" + key + "_val");
+        if (valEl) valEl.textContent = el.value;
       } else {
         el.value = val != null ? String(val) : "";
       }
@@ -780,37 +1065,57 @@ function loadSettings() {
     if (webuiUrl) {
       webuiUrl.value = window.location.origin + "/api/v1/plugins/extensions/astrbot_plugin_voice_assistant/panel";
     }
+    // 概率滑块值显示
+    ["trigger_group_probability", "trigger_private_probability"].forEach(function(k) {
+      var el = $("cfg_" + k);
+      var valEl = $("cfg_" + k + "_val");
+      if (el && valEl) {
+        el.addEventListener("input", function() {
+          valEl.textContent = this.value;
+        });
+      }
+    });
   });
 }
 
 function loadProviderOptions() {
   apiGet("get_tts_providers").then(function(res) {
-    if (!res.success) return;
-    var primary = $("cfg_tts_provider_id");
-    var fallback = $("cfg_tts_fallback_provider_id");
+    if (!res.success) { showError(res.error || "加载 TTS 提供商列表失败"); return; }
+    var primary = $("cfg_basic_tts_provider_id");
+    var fallback = $("cfg_basic_tts_fallback_id");
+    var model = $("cfg_send_tts_text_model");
+    var sessionPid = $("cfg_basic_tts_by_session_pid");
     if (!primary || !fallback) return;
-    var options = '<option value="">-- 系统默认 --</option>';
-    var fallbackOptions = '<option value="">-- 不使用降级 --</option>';
+    var defaultOpt = '<option value="">-- 系统默认 --</option>';
+    var noFallbackOpt = '<option value="">-- 不使用降级 --</option>';
+    var modelOpt = '<option value="">-- 使用主 LLM --</option>';
     (res.providers || []).forEach(function(p) {
+      if (p.id === "lingyin_tts") return;
       var label = p.name + (p.model ? " (" + p.model + ")" : "");
-      options += '<option value="' + p.id + '">' + label + '</option>';
-      fallbackOptions += '<option value="' + p.id + '">' + label + '</option>';
+      defaultOpt += '<option value="' + p.id + '">' + label + '</option>';
+      noFallbackOpt += '<option value="' + p.id + '">' + label + '</option>';
     });
-    primary.innerHTML = options;
-    fallback.innerHTML = fallbackOptions;
+    (res.llm_providers || []).forEach(function(p) {
+      var label = p.name + (p.model ? " (" + p.model + ")" : "");
+      modelOpt += '<option value="' + p.id + '">' + label + '</option>';
+    });
+    primary.innerHTML = defaultOpt;
+    fallback.innerHTML = noFallbackOpt;
+    if (model) model.innerHTML = modelOpt;
+    if (sessionPid) sessionPid.innerHTML = defaultOpt;
     primary.value = res.current_id || "";
     fallback.value = res.fallback_id || "";
   });
 }
 
 function updateCloudFields() {
-  var backend = ($("cfg_cloud_backend") || {}).value || "custom";
+  var backend = ($("cfg_backup_cloud_backend") || {}).value || "custom";
   document.querySelectorAll(".cloud-fields").forEach(function(el) {
     el.style.display = el.dataset.backend === backend ? "block" : "none";
   });
 }
 document.addEventListener("change", function(e) {
-  if (e.target.id === "cfg_cloud_backend") updateCloudFields();
+  if (e.target.id === "cfg_backup_cloud_backend") updateCloudFields();
 });
 
 $("saveConfigBtn").addEventListener("click", function() {
@@ -822,12 +1127,15 @@ $("saveConfigBtn").addEventListener("click", function() {
   CONFIG_FIELDS.forEach(function(key) {
     var el = $("cfg_" + key);
     if (!el) return;
+    var group = FIELD_TO_GROUP[key];
+    if (!group) return;
+    if (!cfg[group]) cfg[group] = {};
     if (el.type === "checkbox") {
-      cfg[key] = el.checked;
+      cfg[group][key] = el.checked;
     } else if (el.type === "number") {
-      cfg[key] = el.value ? parseFloat(el.value) : 0;
+      cfg[group][key] = el.value ? parseFloat(el.value) : 0;
     } else {
-      cfg[key] = el.value;
+      cfg[group][key] = el.value;
     }
   });
   apiPost("save_config", { config: cfg }).then(function(res) {
@@ -850,7 +1158,8 @@ $("saveConfigBtn").addEventListener("click", function() {
 // ============================================================
 function loadPermissions() {
   apiGet("get_permissions").then(function(res) {
-    if (!res.success) return;
+    if (!res.success) { showError(res.error || "加载权限失败"); return; }
+    clearError();
     var p = res.permissions || {};
     $("permDefault").value = String(p.default_level || 1);
     var levels = p.levels || [];
@@ -885,7 +1194,7 @@ function loadPermissions() {
 
 function loadSessionList() {
   apiGet("get_recent_sessions").then(function(res) {
-    if (!res.success) return;
+    if (!res.success) { showError(res.error || "加载会话列表失败"); return; }
     var dl = $("sessionList");
     if (!dl) return;
     dl.innerHTML = (res.sessions || []).map(function(s) {
@@ -917,7 +1226,8 @@ var densityChart = null;
 
 function loadStatistics() {
   apiGet("get_density_stats").then(function(res) {
-    if (!res.success) return;
+    if (!res.success) { showError(res.error || "加载统计数据失败"); return; }
+    clearError();
     var stats = res.stats || {};
 
     // 配置参数
@@ -947,29 +1257,31 @@ function loadStatistics() {
       }).join("");
     }
 
-    // Chart.js 柱状图
-    if (densityChart) { densityChart.destroy(); densityChart = null; }
-    var labels = sessions.map(function(s) { return s.session_id.length > 12 ? s.session_id.slice(0, 12) + ".." : s.session_id; });
-    var counts = sessions.map(function(s) { return s.count; });
-    var maxes = sessions.map(function(s) { return s.max; });
-    var ctx = $("densityChart").getContext("2d");
-    densityChart = new Chart(ctx, {
-      type: "bar",
-      data: {
-        labels: labels.length ? labels : ["暂无数据"],
-        datasets: [
-          { label: "当前次数", data: labels.length ? counts : [0], backgroundColor: "rgba(137,180,250,0.7)" },
-          { label: "上限", data: labels.length ? maxes : [0], backgroundColor: "rgba(243,139,168,0.5)" },
-        ],
-      },
-      options: {
-        responsive: true,
-        plugins: { legend: { labels: { color: "#a6adc8" } } },
-        scales: {
-          x: { ticks: { color: "#a6adc8" }, grid: { color: "rgba(69,71,90,0.5)" } },
-          y: { beginAtZero: true, ticks: { color: "#a6adc8", stepSize: 1 }, grid: { color: "rgba(69,71,90,0.5)" } },
+    // Chart.js 柱状图（按需加载）
+    loadChartJs(function() {
+      if (densityChart) { densityChart.destroy(); densityChart = null; }
+      var labels = sessions.map(function(s) { return s.session_id.length > 12 ? s.session_id.slice(0, 12) + ".." : s.session_id; });
+      var counts = sessions.map(function(s) { return s.count; });
+      var maxes = sessions.map(function(s) { return s.max; });
+      var ctx = $("densityChart").getContext("2d");
+      densityChart = new Chart(ctx, {
+        type: "bar",
+        data: {
+          labels: labels.length ? labels : ["暂无数据"],
+          datasets: [
+            { label: "当前次数", data: labels.length ? counts : [0], backgroundColor: "rgba(137,180,250,0.7)" },
+            { label: "上限", data: labels.length ? maxes : [0], backgroundColor: "rgba(243,139,168,0.5)" },
+          ],
         },
-      },
+        options: {
+          responsive: true,
+          plugins: { legend: { labels: { color: "#a6adc8" } } },
+          scales: {
+            x: { ticks: { color: "#a6adc8" }, grid: { color: "rgba(69,71,90,0.5)" } },
+            y: { beginAtZero: true, ticks: { color: "#a6adc8", stepSize: 1 }, grid: { color: "rgba(69,71,90,0.5)" } },
+          },
+        },
+      });
     });
   });
 }
@@ -979,7 +1291,8 @@ function loadStatistics() {
 // ============================================================
 function loadArchive() {
   apiGet("get_archive_list").then(function(res) {
-    if (!res.success) return;
+    if (!res.success) { showError(res.error || "加载归档列表失败"); return; }
+    clearError();
     $("archiveInfo").textContent = "路径: " + (res.path || "-") +
       " | 保留: " + (res.retention_days || 0) + " 天" +
       " | 文件数: " + (res.total || 0);
@@ -1049,7 +1362,7 @@ function loadArchive() {
 // ============================================================
 function loadTestProviders() {
   apiGet("get_tts_providers").then(function(res) {
-    if (!res.success) return;
+    if (!res.success) { showError(res.error || "加载 TTS 提供商失败"); return; }
     var sel = $("testProvider");
     if (!sel) return;
     var html = '<option value="">-- 使用配置默认 --</option>';
@@ -1103,6 +1416,12 @@ $("testTtsBtn").addEventListener("click", function() {
       return;
     }
     var audio = $("testAudio");
+    if (!res.filename) {
+      showStatus($("testStatus"), "归档失败，无法播放音频", "error");
+      btn.disabled = false;
+      loading.textContent = "";
+      return;
+    }
     var audioUrl = API_PREFIX + "/serve_archive?name=" + encodeURIComponent(res.filename);
     audio.src = audioUrl;
     $("testResult").style.display = "block";

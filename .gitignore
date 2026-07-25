@@ -8,6 +8,13 @@ build/
 .venv/
 venv/
 
+# Test
+.pytest_cache/
+tests/
+
+# Development
+.superpowers/
+
 # OS
 .DS_Store
 Thumbs.db

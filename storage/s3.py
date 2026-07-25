@@ -1,8 +1,4 @@
-"""
-聆音 — S3 兼容云存储 Provider
-============================================
-使用 boto3 (AWS SDK) 上传到任何 S3 兼容存储。
-"""
+"""聆音 — S3 兼容云存储 Provider。使用 boto3 上传到 S3 兼容存储。"""
 import asyncio
 import mimetypes
 import os

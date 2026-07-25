@@ -1,134 +1,105 @@
 # 聆音 — AI 语音助手
 
-允许 AI 通过 `ai_speak` 工具自主调用 TTS 回复语音。支持多 Provider 降级、三级权限管理、长文本分段合并、双层密度控制。
+聆音是 AstrBot 的拟人化 TTS 行为系统，原生 TTS 调度的透明替换层。AI 人格通过它自主决定何时说话、用什么语气说。
 
-## 功能
+## 核心特性
 
-- **LLM 工具 `ai_speak`** — AI 通过 function calling 自主决定何时发语音
-- **三级权限管理** — 无限制 / 基准限制 / 完全限制，按会话独立配置，支持 `/voice_perm` 指令
-- **长文本分段合并** — 超长文本按句号自动分段合成，可选合并为一条语音
-- **多 Provider 降级** — 首选 → 兜底 → 系统默认三级自动切换
-- **双层密度控制** — 会话级硬阻断 + 用户级 Logistic 概率降权
-- **速率限制** — 每会话可配置最小调用间隔
-- **文字+语音双输出** — 同时发送文字和语音文件
+- **AI 人格驱动** — system prompt 注入语音规则 + 概率决策，AI 性格决定说话频率
+- **情感控制** — AI 自标 `[tone:xxx]` > Keyword 检测 > 韵律降级
+- **语言转换** — AI 直接输出目标语言 + 聆音质量校验 + LLM 兜底翻译
+- **分层概率控制** — 群聊/私聊独立概率、强制概率模式、会话级覆盖
+- **密度控制** — 会话级硬阻断 + 用户级概率降权，防止刷屏
+- **缓存友好** — 语音规则模板固定注入，仅 15 字概率决策行随请求变化
+- **文本清洗** — 合成前自动净化（emoji/颜文字/网络用语/去重/标点）
+- **PC 共存** — auto/lingyin/other 三模式，自动检测 private_companion 状态
+- **标签兼容** — 支持 `<lingyin>` / `<tts>` / `<pc_tts>`，可扩展自定义标签
+- **品牌命令 /ly** — 权限、引擎、概率、开关、路由统一管理
 
-## 前置条件
+## 架构
 
-AstrBot 已注册至少一个 TTS Provider（如 Aliyun MiniMax TTS）。
+```
+__init__.py          入口 re-export
+core.py              Main 类：构造、Provider 注册、事件钩子、指令
+│
+├── api/handlers.py       WebUI API handler（闭包绑定，16 个端点）
+│
+├── providers/
+│   └── lingyin_provider.py     TTSProvider — 注册 + 兜底增强 + 路由
+│
+├── backend/
+│   ├── injector.py              system prompt 注入（固定模板，缓存友好）
+│   ├── tag_parser.py            标签解析 & 归一化 & Token 保护
+│   ├── pipeline.py              核心管线编排
+│   ├── emotion.py               情感引擎（AI 自标 + Keyword + 韵律）
+│   ├── language.py              语言检测 + 转换 + 质量校验
+│   ├── sanitizer.py             文本清洗
+│   ├── frequency.py             频率门控（概率采样 + 密度 + 速率）
+│   ├── tts_handler.py           ai_speak 工具编排
+│   ├── synthesizer.py           音频分段、合成、合并（纯函数）
+│   ├── permissions.py           三级权限管理
+│   └── density.py               双层密度控制
+│
+├── bridge/
+│   └── pc_bridge.py             private_companion 共存桥接
+│
+├── storage/                     音频存储 & 云备份
+├── _config.py                   共享配置映射表
+└── pages/webui/standalone.html  独立管理面板
+```
 
-## 快速开始
+## 概率与语音决策流程
 
-1. 在 WebUI 配置面板中开启 `voice_enabled`
-2. 选择 `tts_provider_id`（如 `tts-aliyun-minimax`）
-3. 其余保持默认即可
-4. 从 QQ 给机器人发消息触发语音，如：**"用语音说你好"**
+```
+on_llm_request
+  ├── 注入语音规则模板（固定文本 → 缓存命中）
+  ├── [语音概率提醒] 本轮放行/不放行（概率判定结果）
+  └── LLM 参考决策回复
 
-## 配置
+on_decorating_result
+  ├── 有 <lingyin> 标签 → 密度/速率检查 → 合成语音
+  ├── 无标签 + 强制概率开 → 包裹全文转语音
+  └── 无标签 + 强制概率关 → 纯文字
+```
 
-设置面板分为 6 个模块：
-
-### 语音引擎
-
-| 配置 | 类型 | 默认 | 说明 |
-|------|------|------|------|
-| `voice_enabled` | bool | true | 全局开关 |
-| `tts_provider_id` | 下拉 | — | 首选 TTS 引擎 |
-| `tts_fallback_provider_id` | 下拉 | — | 备选引擎（自动降级） |
-
-### 文本处理
-
-| 配置 | 类型 | 默认 | 说明 |
-|------|------|------|------|
-| `min_text_length` | int | 2 | 最小长度，短于此值跳过 |
-| `max_text_length` | int | 500 | 文本上限，超长自动分段不截断 |
-| `tts_segment_max_chars` | int | 80 | 每段最大字符数 |
-| `tts_merge_enabled` | bool | false | 是否合并多段为一条语音 |
-| `tts_merge_timeout_seconds` | int | 30 | 合并超时（秒），需开启合并 |
-
-### 频率控制
-
-| 配置 | 类型 | 默认 | 说明 |
-|------|------|------|------|
-| `rate_limit_seconds` | int | 5 | 两次语音最小间隔（0=不限制） |
-| `density_window_minutes` | int | 10 | 会话密度统计窗口（分钟） |
-| `density_max_count` | int | 3 | 窗口内最大语音次数 |
-| `user_density_window_minutes` | int | 60 | 用户密度统计窗口（分钟） |
-| `user_density_threshold` | int | 5 | 触发频次阈值，超此值概率衰减 |
-| `user_density_curve_steepness` | float | 0.7 | 衰减陡峭度（0=关闭降权） |
-
-### 权限管理
-
-| 配置 | 类型 | 默认 | 说明 |
-|------|------|------|------|
-| `default_permission_level` | 下拉 | 1 | 默认权限等级 |
-| `session_permissions` | list | [] | 会话权限覆盖（格式：`ID:等级`） |
-
-权限等级说明：
-
-| 等级 | 值 | 行为 |
-|------|-----|------|
-| 无限制 | 0 | 跳过所有速率/密度检查（管理员私聊默认） |
-| 基准限制 | 1 | 受速率间隔和双层密度控制（全局默认） |
-| 完全限制 | 2 | 禁止语音（即黑名单） |
-
-### LLM 行为
-
-| 配置 | 类型 | 默认 | 说明 |
-|------|------|------|------|
-| `voice_prompt_extra` | text | "" | 注入 LLM 的语音行为规则 |
-
-### 调试
-
-| 配置 | 类型 | 默认 | 说明 |
-|------|------|------|------|
-| `log_level` | 下拉 | info | info / debug |
+密度控制在输出层由 FrequencyGate 独立完成，不影响 system prompt 缓存。
 
 ## 指令
 
 | 指令 | 说明 |
 |------|------|
-| `/voice_perm set <ID> <0|1|2>` | 设置会话权限等级（管理员） |
-| `/voice_perm get [ID]` | 查询会话权限 |
-| `/voice_perm list` | 列出所有自定义权限 |
-| `/voice_perm del <ID>` | 删除自定义权限，恢复默认 |
-| `/voice_perm help` | 显示帮助 |
+| `/ly perm set <ID> <0\|1\|2> [prob]` | 设置会话权限等级+可选概率 |
+| `/ly perm list` | 列出所有自定义权限 |
+| `/ly perm get [ID]` | 查询会话权限 |
+| `/ly perm del <ID>` | 删除自定义权限 |
+| `/ly engine set <ID> <engine>` | 设置会话 TTS 引擎 |
+| `/ly engine get/list` | 查询/列出会话引擎 |
+| `/ly prob set <ID> <0~1>` | 设置会话概率覆盖 |
+| `/ly status` | 当前状态摘要 |
+| `/ly on / off` | 启用/禁用语音 |
+| `/ly route <auto\|lingyin\|other>` | 设置路由模式 |
+| `/voice_perm ...` | 兼容别名，等同于 `/ly perm ...` |
 | `/sid` | 获取当前会话 ID |
 
 ## 日志
 
-工具调用和密度判定始终输出 info 日志。在 AstrBot 控制台搜索以下关键词：
-
 | 关键词 | 含义 |
 |--------|------|
-| `[ai_speak] >>>` | LLM 调用了 ai_speak |
-| `[ai_speak] 权限等级` | 当前权限判定结果 |
-| `[ai_speak] 文本分段` | 长文本被分为几段 |
-| `[ai_speak] TTS合成` | 每段语音合成进度 |
-| `[ai_speak] 发送消息` | 语音已发送 |
-| `[密度判定-会话]` | 会话级密度检查 |
-| `[密度判定-用户]` | 用户级概率降权计算 |
+| `[聆音]` | 加载/卸载/桥接/决策信息 |
+| `[聆音] TTS决策` | 阶段决策日志（跳过/处理/强制概率） |
+| `[ai_speak] >>>` | LLM 调用了 ai_speak 工具 |
+| `[ai_speak] TTS合成` | 语音合成进度 |
+| `[voice_perm]` | 权限管理操作 |
 
-## 密度控制
+## 版本
 
-**会话级**（硬阻断）：短窗口内超限后完全阻止语音，注入提示给 LLM。
-**用户级**（概率降权）：Logistic 曲线 `P=1/(1+exp(steepness×(count-threshold)))`，每个用户独立统计，静默降权。
+- **v3.0** — 拟人化 TTS 行为系统：TTSProvider 注册、三层事件钩子、六大增强引擎、缓存友好重构
+- **v2.x** — WebUI、云存储、模块化重构
+- **v1.x** — ai_speak 工具、权限管理、长文本分段
 
-| 触发次数 | 概率 |
-|---------|------|
-| 0 | ~97% |
-| 3 | ~80% |
-| 5（阈值） | 50% |
-| 7 | ~20% |
-| 10+ | ~3% |
+## 致谢
 
-## 长文本处理
-
-```
-超长文本 → 按换行符分段 → 按句号再分段 → 每段 ≤ 80 字符
-                ↓
-       逐段 TTS 合成 → 合并开关?
-                    ↓ 开启        ↓ 关闭
-              合并为一条 → 超时 30s → 降级为分段发送
-```
-
-> 版本历史请参阅 [CHANGELOG.md](CHANGELOG.md)。
+- [astrbot_plugin_meme_manager](https://github.com/anka-afk/astrbot_plugin_meme_manager)
+- [astrbot_plugin_private_companion](https://github.com/initencounter/astrbot_plugin_private_companion)
+- [astrbot_plugin_group_chat_plus](https://github.com/Him666233/astrbot_plugin_group_chat_plus)
+- [AstrBot](https://github.com/Soulter/AstrBot)
+- [MaiBot](https://github.com/MaiM-with-u/MaiBot)

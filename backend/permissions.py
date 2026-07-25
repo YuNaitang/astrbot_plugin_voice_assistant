@@ -1,8 +1,7 @@
 """
 聆音 — 权限管理
-====================================
-权限等级: 0=无限制, 1=基准限制, 2=完全限制。
-支持按 session ID / QQ 号单独配置，支持 /voice_perm 指令管理。
+
+权限等级: 0=无限制, 1=基准限制, 2=完全限制。支持按 session 单独配置。
 """
 import json as _json
 import os
@@ -23,9 +22,10 @@ PERM_LABELS = {0: "无限制", 1: "基准限制", 2: "完全限制"}
 class PermissionManager:
     """会话语音权限管理器。"""
 
-    def __init__(self, config: dict):
+    def __init__(self, config: dict, persist_callback=None):
         self.config = config
         self.cache: dict[str, int] = {}
+        self._persist_callback = persist_callback
         self.load_cache()
 
     # ----------------------------------------------------------------
@@ -37,7 +37,7 @@ class PermissionManager:
         self.cache.clear()
 
         # 1. 新格式：session_permissions
-        entries = self.config.get("session_permissions", []) or []
+        entries = self.config.get("trigger_probability", {}).get("trigger_session_overrides", []) or []
         for entry in entries:
             entry = entry.strip()
             if not entry:
@@ -75,7 +75,7 @@ class PermissionManager:
             return self.cache[sid]
         if event.is_admin() and msg_type == MessageType.FRIEND_MESSAGE:
             return PERM_UNLIMITED
-        return self.config.get("default_permission_level", PERM_BASIC)
+        return self.config.get("trigger_probability", {}).get("trigger_default_permission", PERM_BASIC)
 
     # ----------------------------------------------------------------
     # 修改
@@ -83,19 +83,21 @@ class PermissionManager:
 
     def set_level(self, session_id: str, level: int):
         """保存权限到配置并刷新缓存。"""
-        entries = self.config.get("session_permissions", []) or []
+        entries = self.config.get("trigger_probability", {}).get("trigger_session_overrides", []) or []
         prefix = f"{session_id}:"
         new_entries = [e for e in entries if not e.startswith(prefix)]
         new_entries.append(f"{session_id}:{level}")
-        self.config["session_permissions"] = new_entries
+        tg = self.config.setdefault("trigger_probability", {})
+        tg["trigger_session_overrides"] = new_entries
         self.load_cache()
         self._persist()
 
     def remove_level(self, session_id: str):
         """删除自定义权限配置，恢复默认等级。"""
-        entries = self.config.get("session_permissions", []) or []
+        entries = self.config.get("trigger_probability", {}).get("trigger_session_overrides", []) or []
         prefix = f"{session_id}:"
-        self.config["session_permissions"] = [e for e in entries if not e.startswith(prefix)]
+        tg = self.config.setdefault("trigger_probability", {})
+        tg["trigger_session_overrides"] = [e for e in entries if not e.startswith(prefix)]
         self.load_cache()
         self._persist()
 
@@ -104,7 +106,10 @@ class PermissionManager:
     # ----------------------------------------------------------------
 
     def _persist(self):
-        """尝试持久化配置到文件。"""
+        """尝试持久化配置到文件（优先使用回调，回退直接写入）。"""
+        if self._persist_callback is not None:
+            self._persist_callback()
+            return
         try:
             config_path = os.path.join(
                 os.path.dirname(os.path.abspath(__file__)),

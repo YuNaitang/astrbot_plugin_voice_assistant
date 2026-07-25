@@ -1,27 +1,23 @@
-"""
-聆音 — 独立 WebUI 服务器
-=============================
-使用 Quart + Hypercorn 在独立端口运行管理面板，
-不受 AstrBot 仪表盘 iframe 沙箱限制。
-"""
+"""聆音 — 独立 WebUI 服务器。使用 Quart+Hypercorn 在独立端口运行管理面板。"""
 import asyncio
 import os
 import json as _json
-from multiprocessing import Process
 
+import aiohttp
+from astrbot.api import logger
 from hypercorn.config import Config as HConfig
 from hypercorn.asyncio import serve
-from quart import Quart, jsonify, request, send_file
+from quart import Quart, jsonify, request, send_file, Response
 
-from astrbot.api import logger
-
-PLUGIN_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+PLUGIN_ROOT = os.path.dirname(os.path.abspath(__file__))
 CONFIG_PATH = os.path.normpath(os.path.join(
     PLUGIN_ROOT, "..", "..", "data", "config",
     "astrbot_plugin_voice_assistant.json",
 ))
 
 app = Quart(__name__)
+
+ASTRBOT_SERVER_URL = "http://localhost:6185"
 
 
 def _load_config() -> dict:
@@ -41,6 +37,8 @@ def _save_config(cfg: dict):
     except Exception as e:
         logger.warning(f"[WebUI] 配置持久化失败: {e}")
 
+
+# ── 本地路由（快速读写，不依赖 AstrBot） ──────────────────────
 
 @app.route("/")
 async def index():
@@ -71,11 +69,57 @@ async def api_save_config():
         return jsonify({"success": False, "error": str(e)})
 
 
+# ── API 反向代理（转发到 AstrBot 主服务） ──────────────────────
+
+@app.route("/api/v1/<path:path>", methods=["GET", "POST", "PUT", "DELETE"])
+async def proxy_api(path: str):
+    target_url = f"{ASTRBOT_SERVER_URL}/api/v1/{path}"
+
+    headers = {}
+    for k, v in request.headers.items():
+        if k.lower() not in ("host", "content-length", "transfer-encoding"):
+            headers[k] = v
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            kwargs: dict = {"headers": headers}
+
+            if request.method == "GET":
+                kwargs["params"] = request.args
+            elif request.method in ("POST", "PUT", "DELETE"):
+                raw_body = await request.get_data()
+                kwargs["data"] = raw_body
+                if "Content-Type" not in headers and request.content_type:
+                    headers["Content-Type"] = request.content_type
+
+            async with session.request(request.method, target_url, **kwargs) as resp:
+                body = await resp.read()
+                resp_headers = {
+                    k: v for k, v in resp.headers.items()
+                    if k.lower() not in ("transfer-encoding", "content-length")
+                }
+                return Response(body, status=resp.status, headers=resp_headers)
+
+    except aiohttp.ClientError as e:
+        logger.warning(f"[WebUI] 代理请求失败: {e}")
+        return jsonify({
+            "success": False,
+            "error": f"无法连接 AstrBot 服务 ({ASTRBOT_SERVER_URL})，请检查服务是否运行",
+        }), 502
+    except Exception as e:
+        logger.error(f"[WebUI] 代理异常: {e}", exc_info=True)
+        return jsonify({"success": False, "error": f"代理异常: {e}"}), 500
+
+
+# ── 启动 ──────────────────────────────────────────────────────
+
 async def _run(port: int):
     hconfig = HConfig()
     hconfig.bind = [f"0.0.0.0:{port}"]
     await serve(app, hconfig)
 
 
-def run_server(port: int):
+def run_server(port: int, astrbot_url: str = "http://localhost:6185"):
+    global ASTRBOT_SERVER_URL
+    ASTRBOT_SERVER_URL = astrbot_url
     asyncio.run(_run(port))

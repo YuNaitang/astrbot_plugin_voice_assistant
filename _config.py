@@ -1,0 +1,62 @@
+"""聆音 — 共享配置映射表。扁平键到嵌套配置路径的映射。"""
+
+_CFG_MAP = {
+    # basic_settings
+    "voice_enabled": ("basic_settings", "basic_voice_enabled"),
+    "basic_voice_enabled": ("basic_settings", "basic_voice_enabled"),
+    "basic_tts_provider_id": ("basic_settings", "basic_tts_provider_id"),
+    "basic_tts_fallback_id": ("basic_settings", "basic_tts_fallback_id"),
+    "basic_tts_by_session": ("basic_settings", "basic_tts_by_session"),
+    "basic_voice_routing": ("basic_settings", "basic_voice_routing"),
+    "basic_install_as_provider": ("basic_settings", "basic_install_as_provider"),
+    # sending_effects
+    "send_form": ("sending_effects", "send_form"),
+    "send_language": ("sending_effects", "send_language"),
+    "send_foreign_text_display": ("sending_effects", "send_foreign_text_display"),
+    "send_tts_scope": ("sending_effects", "send_tts_scope"),
+    "send_generation_method": ("sending_effects", "send_generation_method"),
+    "send_tts_text_model": ("sending_effects", "send_tts_text_model"),
+    "send_tts_extra_prompt": ("sending_effects", "send_tts_extra_prompt"),
+    "send_llm_behavior_inject": ("sending_effects", "send_llm_behavior_inject"),
+    # trigger_probability
+    "trigger_group_probability": ("trigger_probability", "trigger_group_probability"),
+    "trigger_private_probability": ("trigger_probability", "trigger_private_probability"),
+    "trigger_force_probability": ("trigger_probability", "trigger_force_probability"),
+    "trigger_density_window": ("trigger_probability", "trigger_density_window"),
+    "trigger_density_max_count": ("trigger_probability", "trigger_density_max_count"),
+    "trigger_user_density_window": ("trigger_probability", "trigger_user_density_window"),
+    "trigger_user_threshold": ("trigger_probability", "trigger_user_threshold"),
+    "trigger_curve_steepness": ("trigger_probability", "trigger_curve_steepness"),
+    "trigger_session_interval": ("trigger_probability", "trigger_session_interval"),
+    "trigger_user_interval": ("trigger_probability", "trigger_user_interval"),
+    "trigger_default_permission": ("trigger_probability", "trigger_default_permission"),
+    "trigger_session_overrides": ("trigger_probability", "trigger_session_overrides"),
+    "default_permission_level": ("trigger_probability", "trigger_default_permission"),
+    "session_permissions": ("trigger_probability", "trigger_session_overrides"),
+    # text_processing
+    "text_min_length": ("text_processing", "text_min_length"),
+    "text_max_length": ("text_processing", "text_max_length"),
+    "text_segment_max_chars": ("text_processing", "text_segment_max_chars"),
+    "text_segment_delay": ("text_processing", "text_segment_delay"),
+    "text_retry_max_attempts": ("text_processing", "text_retry_max_attempts"),
+    "text_merge_enabled": ("text_processing", "text_merge_enabled"),
+    "text_merge_target_duration": ("text_processing", "text_merge_target_duration"),
+    "text_merge_timeout": ("text_processing", "text_merge_timeout"),
+    # post_processing
+    "post_compatible_tags": ("post_processing", "post_compatible_tags"),
+    "post_auto_convert": ("post_processing", "post_auto_convert"),
+    # backup_settings
+    "backup_chat_id": ("backup_settings", "backup_chat_id"),
+    "backup_local_enabled": ("backup_settings", "backup_local_enabled"),
+    "backup_local_dir": ("backup_settings", "backup_local_dir"),
+    "backup_local_retention_days": ("backup_settings", "backup_local_retention_days"),
+    "backup_cloud_enabled": ("backup_settings", "backup_cloud_enabled"),
+    "backup_cloud_backend": ("backup_settings", "backup_cloud_backend"),
+    "cloud_backup_enabled": ("backup_settings", "backup_cloud_enabled"),
+    "local_audio_retention_days": ("backup_settings", "backup_local_retention_days"),
+    # misc_settings
+    "log_level": ("misc_settings", "log_level"),
+    "webui_enabled": ("misc_settings", "webui_enabled"),
+    "webui_port": ("misc_settings", "webui_port"),
+    "astrbot_server_url": ("misc_settings", "astrbot_server_url"),
+}

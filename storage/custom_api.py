@@ -1,8 +1,4 @@
-"""
-聆音 — 自定义 API 云存储 Provider
-================================================
-使用 aiohttp multipart/form-data POST 上传到用户自定义 API。
-"""
+"""聆音 — 自定义 API 云存储 Provider。使用 aiohttp multipart POST 上传到自定义 API。"""
 import asyncio
 import json as _json
 import os

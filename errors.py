@@ -1,8 +1,4 @@
-"""
-聆音 — 自定义异常层次
-=====================================
-基类 VoiceAssistantError，按模块细分异常类型，便于精确捕获和调试。
-"""
+"""聆音 — 自定义异常层次。基类 VoiceAssistantError，按模块细分异常类型。"""
 
 
 class VoiceAssistantError(Exception):

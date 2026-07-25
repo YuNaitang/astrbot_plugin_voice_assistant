@@ -1,302 +1,453 @@
 {
-  "voice_enabled": {
-    "description": "启用语音回复",
-    "type": "bool",
-    "default": true,
-    "hint": "关闭后 AI 不会调用 ai_speak 工具"
+  "basic_settings": {
+    "description": "基本设置",
+    "type": "object",
+    "items": {
+      "basic_voice_enabled": {
+        "description": "启用语音回复",
+        "type": "bool",
+        "default": true,
+        "hint": "关闭后 AI 不会触发 TTS"
+      },
+      "basic_tts_provider_id": {
+        "description": "首选 TTS 引擎",
+        "type": "string",
+        "_special": "select_provider_tts",
+        "default": "",
+        "hint": "在 AstrBot 已注册的 TTS Provider 中选择。留空则使用系统全局默认"
+      },
+      "basic_tts_fallback_id": {
+        "description": "备用 TTS 引擎",
+        "type": "string",
+        "_special": "select_provider_tts",
+        "default": "",
+        "hint": "首选不可用时自动切换到此处。留空则不启用自动切换"
+      },
+      "basic_tts_by_session": {
+        "description": "会话引擎指定",
+        "type": "list",
+        "items": {"type": "string"},
+        "hint": "格式: QQ号:引擎ID（引擎ID见下方下拉列表中的选项值）。不同QQ群/私聊可指定不同TTS引擎"
+      },
+      "basic_voice_routing": {
+        "description": "语音路由模式",
+        "type": "string",
+        "default": "auto",
+        "options": ["auto", "lingyin", "other"],
+        "labels": ["智能 — 自动检测其他插件的TTS状态", "聆音 — 接管全部语音", "其他 — 仅作为TTS Provider，不监听AI输出"],
+        "hint": "控制聆音事件钩子是否生效。修改后需重启"
+      },
+      "basic_install_as_provider": {
+        "description": "注册为系统 TTS Provider",
+        "type": "bool",
+        "default": true,
+        "hint": "关闭后不注册为 AstrBot 标准 TTSProvider"
+      }
+    }
   },
-
-  "tts_provider_id": {
-    "description": "首选 TTS 引擎",
-    "type": "string",
-    "_special": "select_provider_tts",
-    "default": "",
-    "hint": "在 AstrBot 已注册的 TTS Provider 中选择。留空则使用系统全局默认"
+  "sending_effects": {
+    "description": "发送效果",
+    "type": "object",
+    "items": {
+      "send_form": {
+        "description": "发送形态",
+        "type": "string",
+        "default": "voice_only",
+        "options": ["voice_only", "text_and_voice"],
+        "labels": ["仅语音", "语音+文字"],
+        "hint": "控制语音消息是否同时附带文字"
+      },
+      "send_language": {
+        "description": "语音目标语种",
+        "type": "string",
+        "default": "auto",
+        "options": ["auto", "ja", "zh", "en"],
+        "labels": ["自动", "日语", "中文", "英语"],
+        "hint": "选auto则不转换文本。指定语种后AI在标签中使用对应语种朗读"
+      },
+      "send_foreign_text_display": {
+        "description": "外语文字显示",
+        "type": "string",
+        "default": "foreign_first",
+        "options": ["foreign_only", "translation_only", "foreign_first", "translation_first"],
+        "labels": ["仅外语原文", "仅中文翻译", "外语原文→中文翻译", "中文翻译→外语原文"],
+        "hint": "非中文语音时，标签外的可见文本排列方式"
+      },
+      "send_tts_scope": {
+        "description": "语音转换范围",
+        "type": "string",
+        "default": "semantic",
+        "options": ["all", "partial", "semantic"],
+        "labels": ["全部 — 强制整条回复转语音", "局部 — 仅转换标签段落", "语义 — AI自主决定"],
+        "hint": "控制 LLM 回复中哪些内容转为语音"
+      },
+      "send_generation_method": {
+        "description": "TTS 生成方法",
+        "type": "string",
+        "default": "llm_tag",
+        "options": ["llm_tag", "assistant_model", "llm_tool"],
+        "labels": ["标签 — 主LLM写标签触发", "辅助模型 — 辅助模型自行判断", "工具 — 主LLM调用ai_speak"],
+        "hint": "选择AI触发TTS的方式。切换后需重启"
+      },
+      "send_tts_text_model": {
+        "description": "TTS 文本模型",
+        "type": "string",
+        "_special": "select_provider",
+        "default": "",
+        "hint": "独立LLM用于TTS后处理。留空则使用主LLM"
+      },
+      "send_tts_extra_prompt": {
+        "description": "TTS 补充提示词",
+        "type": "text",
+        "default": "",
+        "hint": "控制TTS引擎的音色、语速、语气等合成参数，不影响LLM决策"
+      },
+      "send_llm_behavior_inject": {
+        "description": "LLM 行为注入",
+        "type": "text",
+        "default": "",
+        "hint": "追加到系统提示词末尾，影响LLM是否触发语音及如何使用语音标签"
+      }
+    }
   },
-  "tts_fallback_provider_id": {
-    "description": "备用 TTS 引擎",
-    "type": "string",
-    "_special": "select_provider_tts",
-    "default": "",
-    "hint": "首选不可用时自动切换到此处。留空则不启用降级"
+  "trigger_probability": {
+    "description": "触发概率",
+    "type": "object",
+    "items": {
+      "trigger_group_probability": {
+        "description": "群聊触发概率",
+        "type": "float",
+        "default": 1.0,
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "hint": "群聊中AI触发TTS的放行概率。1.0=总是放行，0.0=从不触发"
+      },
+      "trigger_private_probability": {
+        "description": "私聊触发概率",
+        "type": "float",
+        "default": 1.0,
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "hint": "私聊中AI触发TTS的放行概率。1.0=总是放行，0.0=从不触发"
+      },
+      "trigger_force_probability": {
+        "description": "强制概率模式",
+        "type": "bool",
+        "default": false,
+        "hint": "跳过密度/速率/权限判定，按群聊/私聊各自的概率采样决定是否触发"
+      },
+      "trigger_density_window": {
+        "description": "密度统计窗口（分钟）",
+        "type": "int",
+        "default": 10,
+        "hint": "在N分钟内统计语音数量，超限则硬阻断"
+      },
+      "trigger_density_max_count": {
+        "description": "窗口内最大次数",
+        "type": "int",
+        "default": 3,
+        "hint": "窗口内最多发送N条语音，超限后完全阻止"
+      },
+      "trigger_user_density_window": {
+        "description": "用户密度窗口（分钟）",
+        "type": "int",
+        "default": 60,
+        "hint": "统计单用户在N分钟内的触发次数"
+      },
+      "trigger_user_threshold": {
+        "description": "用户阈值",
+        "type": "int",
+        "default": 5,
+        "hint": "超过此次数后触发概率逐渐下降"
+      },
+      "trigger_curve_steepness": {
+        "description": "约束曲线强度",
+        "type": "float",
+        "default": 0.7,
+        "hint": "值越大衰减越急剧。0=关闭。建议0.3~1.5"
+      },
+      "trigger_session_interval": {
+        "description": "会话触发间隔（秒）",
+        "type": "int",
+        "default": 5,
+        "hint": "同一会话两次语音至少相隔N秒（适用于群聊/私聊的频率控制）。0=不限制"
+      },
+      "trigger_user_interval": {
+        "description": "用户触发间隔（秒）",
+        "type": "int",
+        "default": 0,
+        "hint": "同一用户跨多个会话至少相隔N秒（适用于单人频繁触发的频率控制）。0=不限制"
+      },
+      "trigger_default_permission": {
+        "description": "默认权限等级",
+        "type": "int",
+        "default": 1,
+        "options": [0, 1, 2],
+        "labels": ["0·无限制 — 不检查速率和密度", "1·标准限制 — 受速率和密度控制", "2·完全限制 — 禁止语音"],
+        "hint": "新会话使用此等级。管理员私聊始终为无限制。用/voice_perm指令单独配置"
+      },
+      "trigger_session_overrides": {
+        "description": "会话权限覆盖",
+        "type": "list",
+        "items": {"type": "string"},
+        "hint": "格式: 会话ID:等级[:概率]。推荐在聊天中向Bot发送/voice_perm指令管理"
+      }
+    }
   },
-
-  "min_text_length": {
-    "description": "文本最短长度",
-    "type": "int",
-    "default": 2,
-    "hint": "短于此值不合成语音，避免 AI 发送单个字/标点的语音。建议 2 ~ 10"
+  "text_processing": {
+    "description": "文本处理",
+    "type": "object",
+    "items": {
+      "text_min_length": {
+        "description": "最短文本长度",
+        "type": "int",
+        "default": 2,
+        "hint": "短于此值不合成语音。建议2~10"
+      },
+      "text_max_length": {
+        "description": "文本上限",
+        "type": "int",
+        "default": 500,
+        "hint": "仅作参考。超长文本自动分段"
+      },
+      "text_segment_max_chars": {
+        "description": "每段最大字符数",
+        "type": "int",
+        "default": 80,
+        "hint": "建议60~120，越小每段越短但段数越多"
+      },
+      "text_segment_delay": {
+        "description": "段间间隔（秒）",
+        "type": "float",
+        "default": 0.3,
+        "hint": "避免TTS API限流。建议0.2~1.0。0=不等待"
+      },
+      "text_retry_max_attempts": {
+        "description": "合成失败重试次数",
+        "type": "int",
+        "default": 2,
+        "hint": "某段合成失败时最多重试N次。0=不重试"
+      },
+      "text_merge_enabled": {
+        "description": "合并多段语音",
+        "type": "bool",
+        "default": false,
+        "hint": "开启后多段音频尝试合并为一条发送。需安装pydub或ffmpeg，缺少时合并不可用"
+      },
+      "text_merge_target_duration": {
+        "description": "合并目标时长（秒）",
+        "type": "int",
+        "default": 30,
+        "hint": "超过此值停止追加更多段"
+      },
+      "text_merge_timeout": {
+        "description": "合并超时（秒）",
+        "type": "int",
+        "default": 30,
+        "hint": "超时自动降级为分段发送"
+      }
+    }
   },
-  "max_text_length": {
-    "description": "文本上限",
-    "type": "int",
-    "default": 500,
-    "hint": "仅作参考。超长文本不会截断，会自动分段、逐段合成后再合并/发送"
+  "post_processing": {
+    "description": "后处理",
+    "type": "object",
+    "items": {
+      "post_compatible_tags": {
+        "description": "标签兼容项",
+        "type": "list",
+        "items": {"type": "string"},
+        "default": ["<tts>", "<pc_tts>"],
+        "hint": "额外兼容的TTS标签格式，每行一条。<lingyin>为自有格式不可修改。添加的标签会自动归一化为<lingyin>"
+      },
+      "post_auto_convert": {
+        "description": "自动语音转换",
+        "type": "bool",
+        "default": false,
+        "hint": "无标签时尝试将可读文本转语音。与语音转换范围=全部互不影响"
+      }
+    }
   },
-  "tts_segment_max_chars": {
-    "description": "每段最大字符数",
-    "type": "int",
-    "default": 80,
-    "hint": "长文本按「换行 → 句号」分割后每段最多 N 字符。建议 60 ~ 120，越小越自然但段数越多"
+  "backup_settings": {
+    "description": "备份设置",
+    "type": "object",
+    "items": {
+      "backup_chat_id": {
+        "description": "备份群聊",
+        "type": "string",
+        "default": "",
+        "hint": "填写纯数字群号，留空则默认通过Bot私聊备份"
+      },
+      "backup_local_enabled": {
+        "description": "启用本地音频归档",
+        "type": "bool",
+        "default": true,
+        "hint": "关闭后不保存任何音频文件到本地"
+      },
+      "backup_local_dir": {
+        "description": "本地存档目录",
+        "type": "string",
+        "default": "",
+        "hint": "留空则使用默认路径"
+      },
+      "backup_local_retention_days": {
+        "description": "本地存档保留天数",
+        "type": "int",
+        "default": 7,
+        "hint": "超过N天自动清理。0=永不清除"
+      },
+      "backup_cloud_enabled": {
+        "description": "启用云存储备份",
+        "type": "bool",
+        "default": false,
+        "hint": "开启后每次生成语音时上传到所选后端"
+      },
+      "backup_cloud_backend": {
+        "description": "云存储后端类型",
+        "type": "string",
+        "default": "custom",
+        "options": ["custom", "s3", "webdav"],
+        "labels": ["自定义API", "S3兼容", "WebDAV"]
+      }
+    }
   },
-  "tts_inter_segment_delay": {
-    "description": "段间间隔（秒）",
-    "type": "float",
-    "default": 0.3,
-    "hint": "每段合成之间等待 N 秒，避免 TTS API 限流。0 = 不等待。建议 0.2 ~ 1.0"
+  "cloud_storage": {
+    "description": "云存储详情",
+    "type": "object",
+    "items": {
+      "cloud_custom_url": {
+        "description": "自定义·请求地址",
+        "type": "string",
+        "default": "",
+        "hint": "[custom] 上传接口URL。multipart/form-data发送"
+      },
+      "cloud_custom_headers": {
+        "description": "自定义·请求头",
+        "type": "text",
+        "default": "",
+        "hint": "[custom] 每行一条，格式 Key: Value"
+      },
+      "cloud_custom_body": {
+        "description": "自定义·附加请求体",
+        "type": "text",
+        "default": "",
+        "hint": "[custom] JSON对象"
+      },
+      "cloud_custom_result_path": {
+        "description": "自定义·返回URL路径",
+        "type": "string",
+        "default": "",
+        "hint": "[custom] 从返回JSON中提取URL的字段路径，支持点分格式。例: data.url"
+      },
+      "cloud_s3_endpoint": {
+        "description": "S3·端点地址",
+        "type": "string",
+        "default": "",
+        "hint": "[s3] S3兼容存储端点URL"
+      },
+      "cloud_s3_region": {
+        "description": "S3·区域",
+        "type": "string",
+        "default": "",
+        "hint": "[s3] 例: us-east-1"
+      },
+      "cloud_s3_bucket": {
+        "description": "S3·存储桶",
+        "type": "string",
+        "default": "",
+        "hint": "[s3] 存储桶名称"
+      },
+      "cloud_s3_access_key": {
+        "description": "S3·Access Key",
+        "type": "string",
+        "default": "",
+        "hint": "[s3] 访问密钥ID"
+      },
+      "cloud_s3_secret_key": {
+        "description": "S3·Secret Key",
+        "type": "string",
+        "default": "",
+        "hint": "[s3] 访问密钥Secret"
+      },
+      "cloud_s3_path_style": {
+        "description": "S3·Path Style",
+        "type": "bool",
+        "default": true,
+        "hint": "true=路径风格(/bucket/key)，false=域名风格(bucket.endpoint/key)"
+      },
+      "cloud_webdav_url": {
+        "description": "WebDAV·端点地址",
+        "type": "string",
+        "default": "",
+        "hint": "[webdav] WebDAV服务器目录URL"
+      },
+      "cloud_webdav_username": {
+        "description": "WebDAV·用户名",
+        "type": "string",
+        "default": "",
+        "hint": "[webdav] 基本认证用户名"
+      },
+      "cloud_webdav_passwd": {
+        "description": "WebDAV·密码",
+        "type": "string",
+        "default": "",
+        "hint": "[webdav] 基本认证密码"
+      },
+      "cloud_smb_share": {
+        "description": "SMB·共享路径",
+        "type": "string",
+        "default": "",
+        "hint": "[smb] 例: \\\\server\\share\\backup"
+      },
+      "cloud_smb_username": {
+        "description": "SMB·用户名",
+        "type": "string",
+        "default": "",
+        "hint": "[smb] 访问共享的用户名"
+      },
+      "cloud_smb_passwd": {
+        "description": "SMB·密码",
+        "type": "string",
+        "default": "",
+        "hint": "[smb] 访问共享的密码"
+      },
+      "cloud_smb_domain": {
+        "description": "SMB·域",
+        "type": "string",
+        "default": "",
+        "hint": "[smb] 可选。Windows网络可能需要填写"
+      }
+    }
   },
-  "tts_retry_max_attempts": {
-    "description": "合成失败重试次数",
-    "type": "int",
-    "default": 2,
-    "hint": "某段合成失败时最多重试 N 次，每次等待时间翻倍。0 = 不重试"
-  },
-  "tts_merge_enabled": {
-    "description": "合并多段语音",
-    "type": "bool",
-    "default": false,
-    "hint": "开启后多段音频会尝试合并为一条语音再发送。需安装 pydub / ffmpeg。注意：会增加工具耗时，可能触发 AstrBot 60s 工具超时。建议保持关闭"
-  },
-  "tts_merge_timeout_seconds": {
-    "description": "合并超时",
-    "type": "int",
-    "default": 30,
-    "hint": "开启合并时最多等待 N 秒，超时自动降级为分段发送。确保合成阶段不撞 60s 工具超时"
-  },
-
-  "rate_limit_seconds": {
-    "description": "调用间隔",
-    "type": "int",
-    "default": 5,
-    "hint": "同一会话两次语音至少相隔 N 秒。仅「基准限制」等级生效。0 = 不限制"
-  },
-  "density_window_minutes": {
-    "description": "密度统计窗口",
-    "type": "int",
-    "default": 10,
-    "hint": "在 N 分钟内统计语音数量，超限则硬阻断。仅「基准限制」等级生效。配合下方「最大次数」使用"
-  },
-  "density_max_count": {
-    "description": "窗口内最大次数",
-    "type": "int",
-    "default": 3,
-    "hint": "窗口内最多发送 N 条语音，超限后完全阻止直到窗口滑出。例: 10 分钟窗口内最多 3 条"
-  },
-  "user_density_window_minutes": {
-    "description": "用户密度窗口",
-    "type": "int",
-    "default": 60,
-    "hint": "统计单用户在 N 分钟内的语音触发次数，用于概率衰减。比会话密度窗口更长"
-  },
-  "user_density_threshold": {
-    "description": "用户阈值",
-    "type": "int",
-    "default": 5,
-    "hint": "超过此次数后概率开始下降（Logistic 曲线）。例: 1 小时内触发 5 次后继续触发概率逐渐降低"
-  },
-  "user_density_curve_steepness": {
-    "description": "衰减陡峭度",
-    "type": "float",
-    "default": 0.7,
-    "hint": "值越大衰减越急剧。0 = 关闭用户级概率降权。建议 0.3 ~ 1.5"
-  },
-
-  "default_permission_level": {
-    "description": "默认权限等级",
-    "type": "int",
-    "default": 1,
-    "options": [0, 1, 2],
-    "labels": [
-      "0 · 无限制 — 不检查速率和密度，随时可发语音",
-      "1 · 基准限制 — 受速率间隔和双层密度控制约束",
-      "2 · 完全限制 — 禁止语音（即黑名单）"
-    ],
-    "hint": "新会话如果没有单独配置，使用此等级。管理员私聊始终为「无限制」。可用 /voice_perm 指令或下方的「会话权限覆盖」单独配置"
-  },
-  "session_permissions": {
-    "description": "会话权限覆盖",
-    "type": "list",
-    "items": {"type": "string"},
-    "hint": "格式: QQ号:等级。例: 10001:0（私聊无限制）或 123456:1（群聊基准限制）。推荐用 /voice_perm 指令管理"
-  },
-  "sessions_blacklist": {
-    "description": "旧版禁止列表",
-    "type": "list",
-    "items": {"type": "string"},
-    "hint": "[兼容] 格式: QQ号 或 群号。已自动映射为权限等级 2。新配置请用上方「会话权限覆盖」"
-  },
-
-  "voice_prompt_extra": {
-    "description": "LLM 行为注入",
-    "type": "text",
-    "default": "",
-    "hint": "追加到系统提示词中的语音行为规则。例：「用可爱的语气说话」「每句话不超过30字」「喜欢用拟声词结尾，如 喵~」"
-  },
-  "backup_session_id": {
-    "description": "备份转发 QQ",
-    "type": "string",
-    "default": "",
-    "hint": "发送语音时同步转发到指定的 QQ 群。填写纯数字群号，留空不转发（默认转发给 bot 自己）"
-  },
-
-  "local_audio_dir": {
-    "description": "本地音频存档目录",
-    "type": "string",
-    "default": "",
-    "hint": "TTS 生成的音频文件会复制一份到该目录持久保留。留空则使用默认路径 data/plugin_data/astrbot_plugin_voice_assistant/tts_archive"
-  },
-  "local_audio_retention_days": {
-    "description": "本地存档保留天数",
-    "type": "int",
-    "default": 7,
-    "hint": "超过 N 天的音频文件会被自动清理。设为 0 则永不清除"
-  },
-
-  "cloud_backup_enabled": {
-    "description": "启用云存储备份",
-    "type": "bool",
-    "default": false,
-    "hint": "开启后每次生成语音时，将音频文件上传到所选后端"
-  },
-  "cloud_backend": {
-    "description": "云存储后端类型",
-    "type": "string",
-    "default": "custom",
-    "options": ["custom", "s3", "webdav", "smb"],
-    "labels": ["自定义 API", "S3 兼容", "WebDAV", "SMB 共享"]
-  },
-  "cloud_custom_url": {
-    "description": "自定义·请求地址",
-    "type": "string",
-    "default": "",
-    "hint": "[custom] 上传接口 URL。文件将以 multipart/form-data 格式发送，文件字段名为 file"
-  },
-  "cloud_custom_headers": {
-    "description": "自定义·请求头",
-    "type": "text",
-    "default": "",
-    "hint": "[custom] 每行一条，格式: Key: Value。例:\nAuthorization: Bearer xxx\nX-Custom: value"
-  },
-  "cloud_custom_body": {
-    "description": "自定义·附加请求体",
-    "type": "text",
-    "default": "",
-    "hint": "[custom] JSON 对象，与文件一起以 multipart/form-data 发送。例: {\"album\": \"tts\"}"
-  },
-  "cloud_custom_result_path": {
-    "description": "自定义·返回 URL 路径",
-    "type": "string",
-    "default": "",
-    "hint": "[custom] 从上传返回 JSON 中提取最终 URL 的路径，支持点语法。例: data.url"
-  },
-  "cloud_s3_endpoint": {
-    "description": "S3·端点地址",
-    "type": "string",
-    "default": "",
-    "hint": "[s3] S3 兼容存储的端点 URL。例: https://s3.amazonaws.com 或 https://play.min.io"
-  },
-  "cloud_s3_region": {
-    "description": "S3·区域",
-    "type": "string",
-    "default": "",
-    "hint": "[s3] 存储区域。例: us-east-1, ap-northeast-1"
-  },
-  "cloud_s3_bucket": {
-    "description": "S3·Bucket",
-    "type": "string",
-    "default": "",
-    "hint": "[s3] 存储桶名称"
-  },
-  "cloud_s3_access_key": {
-    "description": "S3·Access Key",
-    "type": "string",
-    "default": "",
-    "hint": "[s3] 访问密钥 ID"
-  },
-  "cloud_s3_secret_key": {
-    "description": "S3·Secret Key",
-    "type": "string",
-    "default": "",
-    "hint": "[s3] 访问密钥 Secret"
-  },
-  "cloud_s3_path_style": {
-    "description": "S3·Path Style",
-    "type": "bool",
-    "default": true,
-    "hint": "[s3] true=路径风格 (/bucket/key)，false=虚拟主机风格 (bucket.endpoint/key)"
-  },
-  "cloud_webdav_url": {
-    "description": "WebDAV·端点地址",
-    "type": "string",
-    "default": "",
-    "hint": "[webdav] WebDAV 服务器目录 URL。例: https://nextcloud.example.com/remote.php/dav/files/user/"
-  },
-  "cloud_webdav_username": {
-    "description": "WebDAV·用户名",
-    "type": "string",
-    "default": "",
-    "hint": "[webdav] 基本认证用户名"
-  },
-  "cloud_webdav_passwd": {
-    "description": "WebDAV·密码",
-    "type": "string",
-    "default": "",
-    "hint": "[webdav] 基本认证密码"
-  },
-  "cloud_smb_share": {
-    "description": "SMB·共享路径",
-    "type": "string",
-    "default": "",
-    "hint": "[smb] 共享目录路径。例: \\\\server\\share\\backup 或 //server/share/backup"
-  },
-  "cloud_smb_username": {
-    "description": "SMB·用户名",
-    "type": "string",
-    "default": "",
-    "hint": "[smb] 访问共享的用户名"
-  },
-  "cloud_smb_passwd": {
-    "description": "SMB·密码",
-    "type": "string",
-    "default": "",
-    "hint": "[smb] 访问共享的密码"
-  },
-  "cloud_smb_domain": {
-    "description": "SMB·域",
-    "type": "string",
-    "default": "",
-    "hint": "[smb] 域（可选）。Windows 网络环境可能需要填写"
-  },
-
-  "log_level": {
-    "description": "日志级别",
-    "type": "string",
-    "default": "info",
-    "options": ["info", "debug"],
-    "labels": [
-      "INFO — 仅记录关键操作（调用、权限、合成、发送）",
-      "DEBUG — 输出所有内部调试信息"
-    ],
-    "hint": "工具调用和密度判定始终输出 info 日志"
-  },
-
-  "send_text_with_voice": {
-    "description": "同时发送文字",
-    "type": "bool",
-    "default": false,
-    "hint": "开启后每条语音消息会附带文字内容一起发送。关闭则仅发送语音，更简洁"
-  },
-
-  "webui_enabled": {
-    "description": "启用独立 WebUI 面板",
-    "type": "bool",
-    "default": true,
-    "hint": "关闭后独立面板(/panel)将不可访问"
-  },
-  "webui_port": {
-    "description": "WebUI 面板端口",
-    "type": "int",
-    "default": 11180,
-    "hint": "独立管理面板的 HTTP 端口。修改后需重启插件生效"
+  "misc_settings": {
+    "description": "杂项",
+    "type": "object",
+    "items": {
+      "log_level": {
+        "description": "日志级别",
+        "type": "string",
+        "default": "info",
+        "options": ["info", "debug"],
+        "labels": ["INFO — 仅记录关键操作", "DEBUG — 输出所有内部调试信息"],
+        "hint": "工具调用和密度判定始终输出info日志"
+      },
+      "webui_enabled": {
+        "description": "启用独立 WebUI 面板",
+        "type": "bool",
+        "default": true,
+        "hint": "关闭后独立面板(/panel)不可访问"
+      },
+      "webui_port": {
+        "description": "WebUI 面板端口",
+        "type": "int",
+        "default": 11180,
+        "hint": "修改后需重启插件生效"
+      },
+      "astrbot_server_url": {
+        "description": "AstrBot 服务地址",
+        "type": "string",
+        "default": "http://localhost:6185",
+        "hint": "默认无需修改"
+      }
+    }
   }
 }

@@ -1,12 +1,13 @@
 name: astrbot_plugin_voice_assistant
 author: YuNaitang
-desc: 允许AI 通过工具主动调 TTS 回复语音。支持多 Provider 降级、三级权限管理、长文本分段合并、会话/用户双层密度控制。
+desc: 聆音 — 拟人化 TTS 行为系统。透明替换 AstrBot 原生 TTS 调度，支持输入概率决策、群聊/私聊独立控制、强制概率、情感控制、语言转换、文本清洗、PC 共存桥接。
 short_desc: 聆音
-version: "2.1.1"
+version: "3.0.0"
 tags:
   - tts
   - voice
   - assistant
+  - anthropomorphic
 category: ai_tools
 astrbot_version: ">=4.16"
 support_platforms:

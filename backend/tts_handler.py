@@ -1,14 +1,6 @@
-"""
-聆音 — TTS 编排核心
-===================================
-负责 ai_speak 工具的完整流程：权限检查 → 文本校验 → 速率限制 → 密度检查
-→ Provider 选取 → 分段 → TTS 合成 → 合并 → 发送 → 备份 → 归档。
-"""
+"""聆音 — TTS 编排核心。处理 ai_speak 工具的权限检查→合成→发送→备份全流程。"""
 import asyncio
 import os
-import random
-import re
-import tempfile
 from datetime import datetime
 from typing import Optional
 
@@ -17,13 +9,9 @@ from astrbot.api.event import AstrMessageEvent
 from astrbot.core.message.components import File, Plain, Record
 from astrbot.core.message.message_event_result import MessageChain
 from astrbot.core.platform.message_type import MessageType
-from astrbot.core.platform.message_session import MessageSession as MessageSesion
+from astrbot.core.platform.message_session import MessageSession
 from astrbot.core.provider.provider import TTSProvider
 
-from ..errors import (
-    TTSProviderError,
-    VoiceAssistantError,
-)
 from ..storage.base import CloudProvider
 from ..storage.custom_api import CustomApiProvider
 from ..storage.local import LocalArchive
@@ -32,27 +20,60 @@ from ..storage.webdav import WebDAVProvider
 
 from .density import DensityController
 from .permissions import (
-    PERM_BASIC,
-    PERM_LABELS,
-    PERM_RESTRICTED,
-    PERM_UNLIMITED,
+    PERM_BASIC, PERM_LABELS, PERM_RESTRICTED, PERM_UNLIMITED,
     PermissionManager,
 )
+from .synthesizer import segment_text, synthesize_segments, merge_audio_files, format_bytes, format_file_size
+
+PERM_LABEL_MAP = {
+    PERM_UNLIMITED: "无限制",
+    PERM_BASIC: "基准限制",
+    PERM_RESTRICTED: "完全限制",
+}
 
 
 class TtsHandler:
     """TTS 编排入口。持有权限、密度、归档、云存储等子模块，编排 ai_speak 的完整流程。"""
 
-    def __init__(self, context, config: dict):
+    # 扁平键 → (组, 嵌套键) 映射
+    _CFG_MAP = {
+        "backup_cloud_enabled": ("backup_settings", "backup_cloud_enabled"),
+        "backup_cloud_backend": ("backup_settings", "backup_cloud_backend"),
+        "basic_voice_enabled": ("basic_settings", "basic_voice_enabled"),
+        "text_min_length": ("text_processing", "text_min_length"),
+        "text_segment_max_chars": ("text_processing", "text_segment_max_chars"),
+        "backup_local_retention_days": ("backup_settings", "backup_local_retention_days"),
+        "trigger_session_interval": ("trigger_probability", "trigger_session_interval"),
+        "basic_tts_provider_id": ("basic_settings", "basic_tts_provider_id"),
+        "basic_tts_fallback_id": ("basic_settings", "basic_tts_fallback_id"),
+        "basic_tts_by_session": ("basic_settings", "basic_tts_by_session"),
+        "text_segment_delay": ("text_processing", "text_segment_delay"),
+        "text_retry_max_attempts": ("text_processing", "text_retry_max_attempts"),
+        "text_merge_enabled": ("text_processing", "text_merge_enabled"),
+        "text_merge_timeout": ("text_processing", "text_merge_timeout"),
+        "text_merge_target_duration": ("text_processing", "text_merge_target_duration"),
+        "send_form": ("sending_effects", "send_form"),
+        "backup_chat_id": ("backup_settings", "backup_chat_id"),
+    }
+
+    def _cfg(self, key, default=None):
+        """读取嵌套配置"""
+        gk = self._CFG_MAP.get(key)
+        if gk:
+            return self.config.get(gk[0], {}).get(gk[1], default)
+        return self.config.get(key, default)
+
+    def __init__(self, context, config: dict, persist_callback=None):
         self.context = context
         self.config = config
+        self._persist_callback = persist_callback
 
         # 运行时状态
         self._last_tts_time: dict[str, datetime] = {}
         self._temp_files: list[str] = []
 
         # 子模块
-        self.perms = PermissionManager(self.config)
+        self.perms = PermissionManager(self.config, persist_callback=self._persist_callback)
         self.density = DensityController(self.config)
         self.archive = LocalArchive(self.config)
         self._cloud_provider: Optional[CloudProvider] = None
@@ -78,10 +99,10 @@ class TtsHandler:
         if self._cloud_provider is not None:
             return self._cloud_provider
 
-        if not self.config.get("cloud_backup_enabled", False):
+        if not self._cfg("backup_cloud_enabled", False):
             return None
 
-        backend = self.config.get("cloud_backend", "custom")
+        backend = self._cfg("backup_cloud_backend", "custom")
         providers = {
             "custom": CustomApiProvider,
             "s3": S3Provider,
@@ -91,7 +112,7 @@ class TtsHandler:
         if not cls:
             logger.warning(f"[tts_cloud] 未知后端类型: {backend}")
             return None
-        self._cloud_provider = cls(self.config)
+        self._cloud_provider = cls(self.config.get("cloud_storage", {}))
         return self._cloud_provider
 
     # ── 核心入口 ──────────────────────────────────────────────
@@ -105,41 +126,37 @@ class TtsHandler:
             f"[ai_speak] >>> 收到调用 session={session_id} user={user_id} "
             f"text_len={len(text) if text else 0}"
         )
-        logger.info(f"[ai_speak] 全文: {text!r}")
+        logger.debug(f"[ai_speak] 全文: {text!r}")
 
         # 0. 总开关
-        if not self.config.get("voice_enabled", True):
-            logger.info("[ai_speak] voice_enabled=false，跳过")
+        if not self._cfg("basic_voice_enabled", True):
+            logger.debug("[ai_speak] voice_enabled=false，跳过")
             return None
 
         # 1. 权限检查
         perm_level = self.perms.get_level(event)
-        perm_label = {
-            PERM_UNLIMITED: "无限制",
-            PERM_BASIC: "基准限制",
-            PERM_RESTRICTED: "完全限制",
-        }.get(perm_level, f"未知({perm_level})")
-        logger.info(f"[ai_speak] 权限等级: {perm_label} (level={perm_level})")
+        perm_label = PERM_LABEL_MAP.get(perm_level, f"未知({perm_level})")
+        logger.debug(f"[ai_speak] 权限等级: {perm_label} (level={perm_level})")
 
         if perm_level == PERM_RESTRICTED:
-            logger.info("[ai_speak] 权限等级=完全限制，跳过")
+            logger.debug("[ai_speak] 权限等级=完全限制，跳过")
             return None
 
         # 2. 文本长度校验
-        min_len = self.config.get("min_text_length", 2)
+        min_len = self._cfg("text_min_length", 2)
         if not text or len(text.strip()) < min_len:
-            logger.info(f"[ai_speak] 文本太短 ({len(text) if text else 0} chars)，跳过")
+            logger.debug(f"[ai_speak] 文本太短 ({len(text) if text else 0} chars)，跳过")
             return None
 
         # 3. 速率限制
         if perm_level == PERM_BASIC and self._check_rate_limit(session_id):
             return None
 
-        # 4. 密度检查
+        # 4. 密度检查（含记录，原子操作）
         if perm_level == PERM_BASIC:
-            allowed, reason = self.density.should_allow(session_id, user_id)
+            allowed, reason = await self.density.check_and_record(session_id, user_id)
             if not allowed:
-                logger.info(f"[ai_speak] 密度判定拒绝: {reason}")
+                logger.debug(f"[ai_speak] 密度判定拒绝: {reason}")
                 return None
 
         # 5. 获取 TTS Provider
@@ -149,9 +166,9 @@ class TtsHandler:
             return "语音合成失败：未找到可用的 TTS 服务，请检查 AstrBot 的 TTS 提供商配置。"
 
         # 6. 文本分段
-        segment_max_chars = self.config.get("tts_segment_max_chars", 80)
-        segments = self._segment_text(text.strip(), segment_max_chars)
-        logger.info(f"[ai_speak] 文本分段: {len(segments)} 段 (max_chars={segment_max_chars})")
+        segment_max_chars = self._cfg("text_segment_max_chars", 80)
+        segments = segment_text(text.strip(), segment_max_chars)
+        logger.debug(f"[ai_speak] 文本分段: {len(segments)} 段 (max_chars={segment_max_chars})")
         for i, seg in enumerate(segments):
             logger.info(
                 f"[ai_speak]   段{i+1}/{len(segments)}: len={len(seg)} "
@@ -159,14 +176,15 @@ class TtsHandler:
             )
 
         # 7. TTS 合成
-        audio_paths = await self._synthesize_segments(provider, segments)
+        audio_paths = await synthesize_segments(provider, segments,
+                                                      self._cfg("text_segment_delay", 0.3),
+                                                      self._cfg("text_retry_max_attempts", 2))
 
         # 8. 合并音频
         final_audio = await self._merge_audio(audio_paths)
 
         # 9. 发送消息
         self._last_tts_time[session_id] = datetime.now()
-        self.density.record_sent(session_id, user_id)
 
         result_msg = await self._send_message(event, text, segments, audio_paths, final_audio)
 
@@ -177,7 +195,7 @@ class TtsHandler:
         await self._archive_and_backup(segments, audio_paths, final_audio, text)
 
         # 后台清理
-        retention = self.config.get("local_audio_retention_days", 7)
+        retention = self._cfg("backup_local_retention_days", 7)
         cleaned = self.archive.cleanup_old(retention)
         if cleaned:
             logger.info(f"[tts_storage] 后台清理: 删除 {cleaned} 个过期文件")
@@ -186,23 +204,12 @@ class TtsHandler:
             f"[ai_speak] <<< 完成 session={session_id} user={user_id} "
             f"segments={len(segments)}"
         )
-        # 记录到 WebUI 最近调用缓冲区
-        self._recent_calls.append({
-            "time": datetime.now().isoformat(),
-            "text": text[:100],
-            "success": result_msg is not None,
-            "segments": len(segments),
-            "session_id": session_id,
-        })
-        if len(self._recent_calls) > 50:
-            self._recent_calls.pop(0)
-
         return result_msg
 
     # ── 速率限制 ──────────────────────────────────────────────
 
     def _check_rate_limit(self, session_id: str) -> bool:
-        rate_seconds = self.config.get("rate_limit_seconds", 5)
+        rate_seconds = self._cfg("trigger_session_interval", 5)
         if rate_seconds <= 0:
             return False
         last_time = self._last_tts_time.get(session_id)
@@ -220,13 +227,30 @@ class TtsHandler:
     # ── TTS Provider 选取 ─────────────────────────────────────
 
     def _get_tts_provider(self, event: AstrMessageEvent) -> Optional[TTSProvider]:
-        provider = self._resolve_provider(self.config.get("tts_provider_id", ""))
+        session_str = str(event.session)
+
+        # 1. 会话级引擎选择（basic_tts_by_session）
+        by_session = self._cfg("basic_tts_by_session", []) or []
+        for entry in by_session:
+            entry = entry.strip()
+            if ":" in entry:
+                sid, pid = entry.split(":", 1)
+                if sid.strip() == session_str:
+                    provider = self._resolve_provider(pid.strip())
+                    if provider is not None:
+                        logger.info(f"ai_speak: 使用会话指定引擎 [{pid.strip()}]")
+                        return provider
+
+        # 2. 首选 Provider
+        provider = self._resolve_provider(self._cfg("basic_tts_provider_id", ""))
         if provider is not None:
             return provider
-        provider = self._resolve_provider(self.config.get("tts_fallback_provider_id", ""))
+        # 3. 降级 Provider
+        provider = self._resolve_provider(self._cfg("basic_tts_fallback_id", ""))
         if provider is not None:
             logger.info("ai_speak: 使用兜底 TTS Provider")
             return provider
+        # 4. 系统默认
         return self.context.get_using_tts_provider(event.unified_msg_origin)
 
     def _resolve_provider(self, provider_id: str) -> Optional[TTSProvider]:
@@ -243,119 +267,19 @@ class TtsHandler:
             return None
         return p
 
-    # ── 分段 / 合并 / 合成 ────────────────────────────────────
-
-    @staticmethod
-    def _segment_text(text: str, max_chars: int = 80) -> list[str]:
-        """按「换行 → 句号 → 逗号 → 强制切分」优先级将长文本分段。"""
-        if len(text) <= max_chars:
-            return [text]
-
-        blocks = re.split(r'\n+', text)
-        segments = []
-        for block in blocks:
-            block = block.strip()
-            if not block:
-                continue
-            if len(block) <= max_chars:
-                segments.append(block)
-            else:
-                sub = re.split(r'(?<=[。？！])', block)
-                for sub_seg in sub:
-                    sub_seg = sub_seg.strip()
-                    if not sub_seg:
-                        continue
-                    if len(sub_seg) <= max_chars:
-                        segments.append(sub_seg)
-                    else:
-                        sub2 = re.split(r'(?<=[，；：])', sub_seg)
-                        for s in sub2:
-                            s = s.strip()
-                            if not s:
-                                continue
-                            if len(s) <= max_chars:
-                                segments.append(s)
-                            else:
-                                while len(s) > max_chars:
-                                    segments.append(s[:max_chars])
-                                    s = s[max_chars:]
-                                if s:
-                                    segments.append(s)
-        return segments
-
-    @staticmethod
-    def _merge_audio_files(audio_paths: list[str]) -> str:
-        """使用 pydub 将多个 WAV 文件合并为一条。若 pydub 不可用则抛出 ImportError。"""
-        from pydub import AudioSegment
-        combined = AudioSegment.empty()
-        for ap in audio_paths:
-            seg = AudioSegment.from_file(ap)
-            combined += seg
-        merged_dir = tempfile.gettempdir()
-        merged_path = os.path.join(
-            merged_dir, f"tts_merged_{random.randint(100000, 999999)}.wav"
-        )
-        combined.export(merged_path, format="wav")
-        return merged_path
-
-    async def _synthesize_segments(
-        self, provider: TTSProvider, segments: list[str]
-    ) -> list[str]:
-        delay = self.config.get("tts_inter_segment_delay", 0.3)
-        max_attempts = self.config.get("tts_retry_max_attempts", 2)
-
-        audio_paths = []
-        for i, seg in enumerate(segments):
-            # 段间间隔：避免 TTS API 限流
-            if i > 0 and delay > 0:
-                await asyncio.sleep(delay)
-
-            for attempt in range(1 + max_attempts):
-                try:
-                    logger.info(
-                        f"[ai_speak] TTS合成 段{i+1}/{len(segments)}: "
-                        f"text={seg!r}{f' (retry {attempt})' if attempt else ''}"
-                    )
-                    audio_path = await provider.get_audio(seg)
-                    logger.info(f"[ai_speak] TTS合成完成 段{i+1}: path={audio_path}")
-                    audio_paths.append(audio_path)
-                    self._temp_files.append(audio_path)
-                    break  # 成功，跳出重试循环
-                except Exception as e:
-                    provider_id = "?"
-                    try:
-                        provider_id = provider.meta().id
-                    except Exception:
-                        pass
-
-                    if attempt < max_attempts:
-                        wait = 2 ** attempt  # 指数退避: 1s, 2s, 4s...
-                        logger.warning(
-                            f"[ai_speak] TTS合成 段{i+1} 失败，{wait}s 后重试 "
-                            f"({attempt+1}/{max_attempts}) "
-                            f"(provider={provider_id}): {e}"
-                        )
-                        await asyncio.sleep(wait)
-                    else:
-                        logger.error(
-                            f"[ai_speak] TTS合成失败 段{i+1} "
-                            f"(provider={provider_id}): {e}"
-                        )
-                        raise TTSProviderError(
-                            f"语音合成失败（{provider_id}）：{e!s}"
-                        ) from e
-        return audio_paths
 
     async def _merge_audio(self, audio_paths: list[str]) -> Optional[str]:
-        merge_enabled = self.config.get("tts_merge_enabled", False)
+        merge_enabled = self._cfg("text_merge_enabled", False)
         if merge_enabled and len(audio_paths) > 1:
-            merge_timeout = self.config.get("tts_merge_timeout_seconds", 30)
+            merge_timeout = self._cfg("text_merge_timeout", 30)
+            target_duration = self._cfg("text_merge_target_duration", 30)
             logger.info(
-                f"[ai_speak] 开始合并 {len(audio_paths)} 段音频 (timeout={merge_timeout}s)"
+                f"[ai_speak] 开始合并 {len(audio_paths)} 段音频 "
+                f"(timeout={merge_timeout}s, target={target_duration}s)"
             )
             try:
                 return await asyncio.wait_for(
-                    asyncio.to_thread(self._merge_audio_files, audio_paths),
+                    asyncio.to_thread(merge_audio_files, audio_paths, target_duration),
                     timeout=merge_timeout,
                 )
             except asyncio.TimeoutError:
@@ -371,7 +295,7 @@ class TtsHandler:
 
     def _build_chain(self, text_part: str, audio_path: str) -> MessageChain:
         """根据 send_text_with_voice 配置构造消息链。"""
-        send_text = self.config.get("send_text_with_voice", False)
+        send_text = self._cfg("send_form", "voice_only") == "text_and_voice"
         record = Record.fromFileSystem(audio_path)
         if send_text:
             return MessageChain([Plain(text_part), record])
@@ -406,7 +330,7 @@ class TtsHandler:
                 f"session={session_id}"
             )
             await event.send(self._build_chain(display_text, final_audio))
-            logger.info(f"[ai_speak] 已发送 session={session_id}")
+            logger.debug(f"[ai_speak] 已发送 session={session_id}")
             if len(segments) > 1:
                 return f"语音消息已发送成功（{len(segments)} 段已合并）"
             return "语音消息已发送成功"
@@ -422,23 +346,29 @@ class TtsHandler:
         event: AstrMessageEvent,
     ):
         """将语音消息转发到备份群。支持分段逐条发送 + 汇总。"""
-        backup = (self.config.get("backup_session_id") or "").strip()
+        backup = (self._cfg("backup_chat_id") or "").strip()
 
-        # 未配置则默认发给 bot 自己
+        # 未配置则默认发给 bot 自己（私聊）
         if not backup or not backup.isdigit():
             self_id = event.get_self_id()
-            if not self_id:
-                logger.info("[ai_speak] 未配置备份会话且无法获取 bot 自身 ID，跳过")
+            if not self_id or not self_id.isdigit():
+                logger.debug("[ai_speak] 备份跳过：无有效备份目标或 bot 自身 ID")
                 return
             backup = self_id
+            # 自备份用私聊消息类型，避免把个人号当群号发送
+            session = MessageSession(
+                event.session.platform_id,
+                MessageType.FRIEND_MESSAGE,
+                backup,
+            )
+        else:
+            session = MessageSession(
+                event.session.platform_id,
+                event.session.message_type,
+                backup,
+            )
 
-        session = MessageSesion(
-            event.session.platform_id,
-            MessageType.GROUP_MESSAGE,
-            backup,
-        )
-
-        logger.info(f"[ai_speak] 备份发送到 QQ 群: {session}")
+        logger.debug(f"[ai_speak] 备份发送到 QQ 群: {session}")
         try:
             # ── 分段发送（多段且未合并）───────────────────────────
             if not final_audio and audio_paths and len(audio_paths) > 1:
@@ -450,7 +380,7 @@ class TtsHandler:
                         continue
                     await self._backup_send_triple(
                         session,
-                        f"📁 语音备份 段{i+1}/{len(segments)}",
+                        f"语音备份 段{i+1}/{len(segments)}",
                         seg,
                         ap,
                     )
@@ -461,9 +391,9 @@ class TtsHandler:
                     if os.path.exists(ap)
                 )
                 summary = (
-                    f"📊 语音备份汇总\n"
+                    f"语音备份汇总\n"
                     f"总段数: {len(segments)}\n"
-                    f"总大小: {self._format_bytes(total_size)}\n"
+                    f"总大小: {format_bytes(total_size)}\n"
                     f"全文: {len(text)} 字"
                 )
                 await self.context.send_message(session, MessageChain([Plain(summary)]))
@@ -474,23 +404,23 @@ class TtsHandler:
                 if not audio or not os.path.exists(audio):
                     return
                 await self._backup_send_triple(
-                    session, "📁 语音备份", text, audio,
+                    session, "语音备份", text, audio,
                 )
 
-            logger.info(f"[ai_speak] 备份发送完成: {session}")
+            logger.debug(f"[ai_speak] 备份发送完成: {session}")
         except Exception as e:
             logger.warning(f"[ai_speak] 备份发送失败 ({session}): {e}")
 
     async def _backup_send_triple(
         self,
-        session: MessageSesion,
+        session: MessageSession,
         title: str,
         text_content: str,
         audio_path: str,
     ):
         """向会话发送三个独立消息：文字信息 → 语音 → 原始文件。"""
         display = text_content[:200] + "..." if len(text_content) > 200 else text_content
-        size_str = self._format_file_size(audio_path)
+        size_str = format_file_size(audio_path)
         info = (
             f"{title}\n"
             f"内容: {display}\n"
@@ -503,29 +433,6 @@ class TtsHandler:
             session,
             MessageChain([File(name=os.path.basename(audio_path), file=audio_path)]),
         )
-
-    @staticmethod
-    def _format_bytes(size: int) -> str:
-        """将字节数格式化为可读字符串。"""
-        if size < 1024:
-            return f"{size} B"
-        elif size < 1024 * 1024:
-            return f"{size / 1024:.1f} KB"
-        return f"{size / (1024 * 1024):.1f} MB"
-
-    @staticmethod
-    def _format_file_size(file_path: str) -> str:
-        """格式化文件大小，返回可读字符串。"""
-        try:
-            size = os.path.getsize(file_path)
-            if size < 1024:
-                return f"{size} B"
-            elif size < 1024 * 1024:
-                return f"{size / 1024:.1f} KB"
-            else:
-                return f"{size / (1024 * 1024):.1f} MB"
-        except OSError:
-            return "未知"
 
     # ── 归档 + 云备份 ─────────────────────────────────────────
 
@@ -555,11 +462,9 @@ class TtsHandler:
 
     async def _cloud_backup(self, file_path: str, text: str):
         """异步执行云存储上传。"""
-        provider = self._get_cloud_provider()
-        if not provider:
-            return
-
-        try:
-            await provider.upload(file_path, text)
-        except Exception as e:
-            logger.warning(f"[tts_cloud] 上传异常: {e}")
+        for provider in (self._get_cloud_provider() for _ in [1] if self._cfg("backup_cloud_enabled", False)):
+            if provider:
+                try:
+                    await provider.upload(file_path, text)
+                except Exception as e:
+                    logger.warning(f"[tts_cloud] 上传异常: {e}")

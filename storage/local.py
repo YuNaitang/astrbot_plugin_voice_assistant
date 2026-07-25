@@ -1,9 +1,4 @@
-"""
-聆音 — 本地音频归档
-===================================
-包含初始化音频存储目录、文件持久化（move）、过期清理。
-每个归档 WAV 附带同名的 .txt 元数据文件。
-"""
+"""聆音 — 本地音频归档。目录初始化、文件持久化、过期清理。"""
 import os
 import random
 import shutil
@@ -29,7 +24,10 @@ class LocalArchive:
 
     def _init(self) -> None:
         """初始化本地音频归档目录。"""
-        raw = (self.config.get("local_audio_dir") or "").strip()
+        if not self.config.get("backup_settings", {}).get("backup_local_enabled", True):
+            logger.debug("[LocalArchive] 本地归档已禁用")
+            return
+        raw = (self.config.get("backup_settings", {}).get("backup_local_dir") or "").strip()
         if not raw:
             raw = os.path.join(
                 get_astrbot_plugin_data_path(),
@@ -41,7 +39,7 @@ class LocalArchive:
             os.makedirs(raw, exist_ok=True)
             self._storage_dir = raw
             self._enabled = True
-            retention = self.config.get("local_audio_retention_days", 7)
+            retention = self.config.get("backup_settings", {}).get("backup_local_retention_days", 7)
             cleaned = self.cleanup_old(retention)
             logger.info(
                 f"聆音: 音频存储目录 {raw} "
@@ -109,7 +107,7 @@ class LocalArchive:
 
     def cleanup_old(self, retention_days: int = 7) -> int:
         """删除超过 retention_days 天的音频文件。返回删除数量。"""
-        if not self._storage_dir:
+        if not self._storage_dir or retention_days <= 0:
             return 0
         cutoff = datetime.now() - timedelta(days=retention_days)
         count = 0

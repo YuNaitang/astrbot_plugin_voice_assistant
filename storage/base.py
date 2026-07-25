@@ -1,8 +1,4 @@
-"""
-聆音 — 云存储 Provider 抽象基类
-==============================================
-所有云上传 Provider 继承此类，实现 upload() 方法。
-"""
+"""聆音 — 云存储 Provider 抽象基类。所有云上传 Provider 继承此类实现 upload()。"""
 import asyncio
 from abc import ABC, abstractmethod
 from typing import Optional
