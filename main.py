@@ -724,7 +724,14 @@ class Main(Star):
 
     @filter.llm_tool(name="ai_speak")
     async def ai_speak(self, event: AstrMessageEvent, text: str):
-        """把文字转成语音回复用户。"""
+        """把文字转成语音回复用户。当你觉得这段话用语音说更自然时调用。
+
+        调用示例：
+          ai_speak(text="好的，我马上处理！")
+
+        Args:
+            text: 想说出的文本，不要加特殊标记
+        """
         logger.info(
             f"[聆音] TTS决策|ai_speak工具调用 umo={event.unified_msg_origin} "
             f"text={text[:60]}..."
